@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 
 import { can, MemberPermissionProfile } from "../engine";
-import { HIERARCHY_LEVELS, SYSTEM_ROLE_TEMPLATES } from "../catalog";
+import { SYSTEM_ROLE_TEMPLATES } from "../catalog";
 
 test("Security Fix 2: Custom role named 'Owner' gets NO bypass", () => {
   // A malicious actor or user creates a custom role with name 'Owner' or 'owner', but isSystem=false and level=50
@@ -86,7 +86,6 @@ test("Security Fix 3: consume_grant_use concurrency test with parallel calls", a
   // UPDATE permission_grants SET usesRemaining = usesRemaining - 1
   // WHERE id = $1 AND usesRemaining > 0 RETURNING ...
   let usesRemaining = 1;
-  let activeLocks = 0;
 
   async function atomicConsumeGrant(grantId: string, callerUserId: string, ownerUserId: string): Promise<boolean> {
     // 1. Caller verification

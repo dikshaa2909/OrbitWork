@@ -416,7 +416,8 @@ export const createDatabasesClient = (client: SupabaseClient) => {
   };
 };
 
-export function getAdminDatabases(reason: string): Databases {
+export function getAdminDatabases(reason?: string): Databases {
+  void reason;
   const adminClient = getSupabaseAdminClient();
   return createDatabasesClient(adminClient);
 }

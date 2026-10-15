@@ -192,7 +192,8 @@ const app = new Hono()
           Query.equal("name", "Owner"),
         ]);
         if (roles.total > 0) {
-          ownerRoleId = roles.documents[0].$id || roles.documents[0].id;
+          const firstRole = roles.documents[0] as { $id?: string; id?: string };
+          ownerRoleId = firstRole.$id || firstRole.id;
         }
       } catch {
         // Fallback

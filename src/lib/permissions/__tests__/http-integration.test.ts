@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 
 // Polyfill WebSocket for node runtime with @supabase/supabase-js
-// @ts-ignore
+// @ts-expect-error WebSocket polyfill for test environment
 global.WebSocket = class {};
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://ovnzqhlamphfkqegvekb.supabase.co";

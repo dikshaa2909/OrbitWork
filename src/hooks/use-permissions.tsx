@@ -76,8 +76,7 @@ export function usePermissions(
 
   const memberId = member?.$id || member?.id;
 
-  // Active role is either the preview role or the user's role
-  const resolvedRoleName = effectiveData?.role?.name || member?.role || "";
+  // Role details
   const roleLevel = effectiveData?.role?.level;
   const isSystemRole = effectiveData?.role?.isSystem;
   

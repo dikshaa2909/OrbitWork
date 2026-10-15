@@ -13,6 +13,8 @@ export type Member = DocumentModel & {
   workspaceId: string;
   userId: string;
   role: MemberRole;
+  roleId?: string;
+  roleName?: string;
   name: string;
   email: string;
 };
