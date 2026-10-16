@@ -1,6 +1,6 @@
-# Jira Clone (Next.js 14 + Supabase)
+# OrbitWork (Next.js 14 + Supabase)
 
-A full-featured Jira clone built with Next.js 14 App Router, Hono API routes, Supabase (PostgreSQL + Auth + Storage), TanStack React Query, Tailwind CSS, and Radix UI.
+A high-performance project management platform with sprint tracking, granular RBAC, and seamless team collaboration built with Next.js 14 App Router, Hono API routes, Supabase (PostgreSQL + Auth + Storage), TanStack React Query, Tailwind CSS, and Radix UI.
 
 ---
 

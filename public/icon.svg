@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <defs>
+    <!-- Background rounded squircle gradient -->
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+
+    <!-- Primary Orbit Gradient -->
+    <linearGradient id="icon-grad-primary" x1="8" y1="12" x2="56" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="50%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+
+    <!-- Secondary Orbit Gradient -->
+    <linearGradient id="icon-grad-secondary" x1="56" y1="12" x2="8" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="60%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+
+    <!-- Central Core Gradient -->
+    <radialGradient id="icon-grad-core" cx="32" cy="32" r="11" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="60%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </radialGradient>
+
+    <!-- Core glow -->
+    <filter id="icon-core-glow" x="16" y="16" width="32" height="32" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect width="64" height="64" rx="16" fill="url(#bg-grad)"/>
+
+  <!-- Orbital Rings -->
+  <!-- Outer Ring 1 -->
+  <ellipse cx="32" cy="32" rx="23" ry="8.5" 
+           transform="rotate(-35 32 32)" 
+           stroke="url(#icon-grad-primary)" 
+           stroke-width="3.6" 
+           stroke-linecap="round"/>
+
+  <!-- Outer Ring 2 -->
+  <ellipse cx="32" cy="32" rx="23" ry="8.5" 
+           transform="rotate(35 32 32)" 
+           stroke="url(#icon-grad-secondary)" 
+           stroke-width="3.2" 
+           stroke-dasharray="42 12 24 8"
+           stroke-linecap="round"/>
+
+  <!-- Central Planet Core -->
+  <circle cx="32" cy="32" r="8.8" fill="url(#icon-grad-core)" filter="url(#icon-core-glow)"/>
+  <circle cx="29.5" cy="29" r="2.4" fill="#FFFFFF" fill-opacity="0.75"/>
+
+  <!-- Satellite Nodes -->
+  <circle cx="50" cy="18" r="3.2" fill="#38BDF8"/>
+  <circle cx="15" cy="45" r="2.6" fill="#818CF8"/>
+</svg>
