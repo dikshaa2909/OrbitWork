@@ -7,7 +7,7 @@ const WorkspaceRequestsPage = async () => {
   if (!user) redirect("/sign-in");
 
   return (
-    <div className="w-full max-w-4xl mx-auto py-4">
+    <div className="w-full max-w-4xl mx-auto py-4 animate-fade-in">
       <AccessRequestsPanel />
     </div>
   );

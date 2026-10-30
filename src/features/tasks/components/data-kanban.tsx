@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, memo } from "react";
 import {
   DragDropContext,
   Droppable,
@@ -29,7 +29,7 @@ interface DataKanbanProps {
   onChange: (tasks: { $id: string; status: TaskStatus; position: number }[]) => void;
 };
 
-export const DataKanban = ({
+export const DataKanban = memo(({
   data,
   onChange,
 }: DataKanbanProps) => {
@@ -92,7 +92,6 @@ export const DataKanban = ({
 
       // If there's no moved task (shouldn't happen, but just in case), return the previous state
       if (!movedTask) {
-        console.error("No task found at the source index");
         return prevTasks;
       }
 
@@ -200,4 +199,6 @@ export const DataKanban = ({
       </div>
     </DragDropContext>
   );
-};
+});
+
+DataKanban.displayName = "DataKanban";

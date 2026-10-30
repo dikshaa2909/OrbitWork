@@ -13,10 +13,33 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { DataFilters } from "./data-filters";
 
+import dynamic from "next/dynamic";
 import { columns } from "./columns";
 import { DataTable } from "./data-table";
-import { DataKanban } from "./data-kanban";
-import { DataCalendar } from "./data-calendar";
+
+const DataKanban = dynamic(
+  () => import("./data-kanban").then((mod) => mod.DataKanban),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full border rounded-lg h-[340px] flex items-center justify-center">
+        <Loader className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+);
+
+const DataCalendar = dynamic(
+  () => import("./data-calendar").then((mod) => mod.DataCalendar),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full border rounded-lg h-[340px] flex items-center justify-center">
+        <Loader className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+);
 
 import { TaskStatus } from "../types";
 import { useGetTasks } from "../api/use-get-tasks";

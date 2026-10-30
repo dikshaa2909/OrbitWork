@@ -356,3 +356,25 @@ test("Engine: Temporary grants — active, expired, exhausted, revoked, and reso
   assert.equal(can(memberWithGrants, "tasks:bulk_edit", { projectId: "project-beta" }), false);
 });
 
+// 18. College Hierarchy & Task Review Verification Gates
+test("Engine: College hierarchy permissions respect roles (HOD & Guides vs Students)", () => {
+  // Owner (HOD / Principal) has absolute bypass
+  assert.equal(can(ownerMember, "college:tasks.verify"), true);
+  assert.equal(can(ownerMember, "college:groups.manage"), true);
+
+  // Admin (Coordinators) has college management & verification permissions
+  assert.equal(can(adminMember, "college:tasks.verify"), true);
+  assert.equal(can(adminMember, "college:groups.manage"), true);
+
+  // Project Manager (Faculty Guide) can verify tasks and grade evaluations, but cannot manage whole batches
+  assert.equal(can(pmMember, "college:tasks.verify"), true);
+  assert.equal(can(pmMember, "college:evaluations.grade"), true);
+  assert.equal(can(pmMember, "college:batches.manage"), false);
+
+  // Member (Student) CANNOT verify tasks or allocate guides, but can submit deliverables
+  assert.equal(can(devMember, "college:tasks.verify"), false);
+  assert.equal(can(devMember, "college:groups.manage"), false);
+  assert.equal(can(devMember, "college:submissions.submit"), true);
+});
+
+

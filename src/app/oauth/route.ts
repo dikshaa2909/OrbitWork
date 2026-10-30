@@ -1,21 +1,50 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
 import { AUTH_COOKIE } from "@/features/auth/constants";
-import { getSupabaseClient } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
+  const error = request.nextUrl.searchParams.get("error");
+  const errorDescription = request.nextUrl.searchParams.get("error_description");
 
-  if (!code) {
-    return new NextResponse("Missing authorization code", { status: 400 });
+  if (error || errorDescription) {
+    const errorMsg = encodeURIComponent(errorDescription || error || "Authentication failed");
+    return NextResponse.redirect(`${request.nextUrl.origin}/sign-in?error=${errorMsg}`);
   }
 
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  if (!code) {
+    return NextResponse.redirect(`${request.nextUrl.origin}/sign-in?error=${encodeURIComponent("Missing authorization code")}`);
+  }
 
-  if (error || !data.session) {
-    return new NextResponse(error?.message || "OAuth exchange failed", { status: 400 });
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Ignore in Route Handler
+          }
+        },
+      },
+    }
+  );
+
+  const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (exchangeError || !data.session) {
+    const errorMsg = encodeURIComponent(exchangeError?.message || "OAuth exchange failed");
+    return NextResponse.redirect(`${request.nextUrl.origin}/sign-in?error=${errorMsg}`);
   }
 
   const sessionSecret = JSON.stringify({
@@ -23,10 +52,10 @@ export async function GET(request: NextRequest) {
     refresh_token: data.session.refresh_token,
   });
 
-  cookies().set(AUTH_COOKIE, sessionSecret, {
+  cookieStore.set(AUTH_COOKIE, sessionSecret, {
     path: "/",
     httpOnly: true,
-    sameSite: "strict",
+    sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: 60 * 60 * 24 * 30,
   });

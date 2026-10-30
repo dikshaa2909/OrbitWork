@@ -9,7 +9,7 @@ import { PageError } from "@/components/page-error";
 import { PermissionGuard } from "@/hooks/use-permissions";
 
 import Link from "next/link";
-import { ShieldCheck, Network, ChevronRight } from "lucide-react";
+import { ShieldCheck, Network, ChevronRight, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -26,8 +26,26 @@ export const WorkspaceIdSettingsClient = () => {
   }
 
   return (
-    <PermissionGuard action="edit_workspace" workspaceId={workspaceId}>
-      <div className="w-full lg:max-w-xl space-y-4">
+    <PermissionGuard action="workspace:settings.edit" workspaceId={workspaceId}>
+      <div className="w-full lg:max-w-xl space-y-4 animate-fade-in">
+        {/* Back navigation & breadcrumb */}
+        <div className="flex items-center justify-between pb-1">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-xs text-muted-foreground hover:text-foreground -ml-2"
+          >
+            <Link href={`/workspaces/${workspaceId}`}>
+              <ArrowLeft className="size-4" />
+              Back to Dashboard
+            </Link>
+          </Button>
+          <span className="text-xs text-muted-foreground font-mono">
+            Workspace &gt; Settings
+          </span>
+        </div>
+
         <Card className="border border-neutral-200 shadow-none">
           <CardContent className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3">

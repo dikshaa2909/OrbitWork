@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -161,7 +162,14 @@ export const CreateTeamDialog: React.FC<CreateTeamDialogProps> = ({
             onClick={handleCreate}
             disabled={!name.trim() || isPending}
           >
-            {isPending ? "Creating..." : "Create Team"}
+            {isPending ? (
+              <>
+                <Loader2 className="size-4 mr-2 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              "Create Team"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

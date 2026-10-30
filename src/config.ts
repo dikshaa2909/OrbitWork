@@ -44,3 +44,18 @@ export const WORKSPACE_SETTINGS_ID = "workspace_settings";
 export const INVITE_LINKS_ID = "invite_links";
 export const ACCESS_REQUESTS_ID = "access_requests";
 export const PERMISSION_GRANTS_ID = "permission_grants";
+
+export const CHANNELS_ID = "channels";
+export const CHANNEL_MEMBERS_ID = "channel_members";
+export const MESSAGES_ID = "messages";
+export const MESSAGE_REACTIONS_ID = "message_reactions";
+
+export const BATCHES_ID = "batches";
+export const ACADEMIC_TEAMS_ID = "academic_teams";
+export const ACADEMIC_TEAM_MEMBERS_ID = "academic_team_members";
+export const TEAM_GUIDES_ID = "team_guides";
+export const MILESTONES_ID = "milestones";
+export const SUBMISSIONS_ID = "submissions";
+export const RUBRICS_ID = "rubrics";
+export const RUBRIC_CRITERIA_ID = "rubric_criteria";
+export const EVALUATIONS_ID = "evaluations";

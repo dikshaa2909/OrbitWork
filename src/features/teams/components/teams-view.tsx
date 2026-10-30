@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MemberAvatar } from "@/features/members/components/member-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useConfirm } from "@/hooks/use-confirm";
 
 interface TeamsViewProps {
   workspaceId: string;
@@ -30,6 +31,12 @@ export const TeamsView: React.FC<TeamsViewProps> = ({ workspaceId }) => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedTeamForMembers, setSelectedTeamForMembers] = useState<Team | null>(null);
 
+  const [DeleteDialog, confirmDelete] = useConfirm(
+    "Delete Team",
+    "Are you sure you want to delete this team? This action cannot be undone.",
+    "destructive"
+  );
+
   const filteredTeams = teams.filter((t) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -39,8 +46,9 @@ export const TeamsView: React.FC<TeamsViewProps> = ({ workspaceId }) => {
     );
   });
 
-  const handleDelete = (teamId: string, teamName: string) => {
-    if (window.confirm(`Are you sure you want to delete team "${teamName}"?`)) {
+  const handleDelete = async (teamId: string) => {
+    const ok = await confirmDelete();
+    if (ok) {
       deleteTeam({ param: { teamId } });
     }
   };
@@ -154,7 +162,7 @@ export const TeamsView: React.FC<TeamsViewProps> = ({ workspaceId }) => {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleDelete(teamId, team.name)}
+                          onClick={() => handleDelete(teamId)}
                           disabled={isDeleting}
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                         >
@@ -239,6 +247,8 @@ export const TeamsView: React.FC<TeamsViewProps> = ({ workspaceId }) => {
         team={selectedTeamForMembers}
         workspaceId={workspaceId}
       />
+
+      <DeleteDialog />
     </div>
   );
 };

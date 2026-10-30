@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Loader2 } from "lucide-react";
+import { ShieldCheck, Loader2, GraduationCap } from "lucide-react";
 
 import { DottedSeparator } from "@/components/dotted-separator";
 import { Button } from "@/components/ui/button";
@@ -83,14 +83,35 @@ export const JoinWorkspaceForm = ({
           You&apos;ve been invited to join <strong>{roleLinkData?.workspaceName || initialValues.name}</strong> workspace.
         </CardDescription>
 
-        {roleLinkData?.roleName && (
+        {roleLinkData?.previewBadgeText ? (
+          <div className="mt-3 flex items-start gap-2.5 p-3 rounded-lg bg-primary/10 border border-primary/20 text-xs text-foreground">
+            {roleLinkData.targetRole === "FACULTY_GUIDE" || roleLinkData.academicTeamId ? (
+              <GraduationCap className="size-5 text-primary shrink-0 mt-0.5" />
+            ) : (
+              <ShieldCheck className="size-5 text-primary shrink-0 mt-0.5" />
+            )}
+            <div className="space-y-1">
+              <p className="font-semibold text-sm">
+                {roleLinkData.previewBadgeText}
+              </p>
+              <div className="flex items-center gap-2 flex-wrap text-muted-foreground text-[11px]">
+                {roleLinkData.batchName && <span>Batch: {roleLinkData.batchName}</span>}
+                {roleLinkData.roleName && (
+                  <Badge variant="outline" className="text-[10px] font-bold uppercase">
+                    {roleLinkData.roleName}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : roleLinkData?.roleName ? (
           <div className="mt-3 flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-xs text-blue-900 dark:text-blue-200">
             <ShieldCheck className="size-4 text-blue-600 shrink-0" />
             <div>
               Assigned Role: <Badge variant="secondary" className="font-bold uppercase text-[10px] ml-1">{roleLinkData.roleName}</Badge>
             </div>
           </div>
-        )}
+        ) : null}
       </CardHeader>
       <div className="px-7">
         <DottedSeparator />

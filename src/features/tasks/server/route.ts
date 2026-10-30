@@ -168,29 +168,36 @@ const app = new Hono()
         query
       );
 
-      const projectIds = tasks.documents.map((task) => task.projectId);
-      const assigneeIds = tasks.documents.map((task) => task.assigneeId);
+      const uniqueProjectIds = Array.from(new Set(tasks.documents.map((t) => t.projectId).filter(Boolean)));
+      const uniqueAssigneeIds = Array.from(new Set(tasks.documents.map((t) => t.assigneeId).filter(Boolean)));
 
-      const projects = await databases.listDocuments<Project>(
-        DATABASE_ID,
-        PROJECTS_ID,
-        projectIds.length > 0 ? [Query.contains("id", projectIds)] : []
-      );
+      const [projects, members] = await Promise.all([
+        uniqueProjectIds.length > 0
+          ? databases.listDocuments<Project>(DATABASE_ID, PROJECTS_ID, [Query.contains("id", uniqueProjectIds)])
+          : { total: 0, documents: [] as Project[] },
+        uniqueAssigneeIds.length > 0
+          ? databases.listDocuments<Member>(DATABASE_ID, MEMBERS_ID, [Query.contains("id", uniqueAssigneeIds)])
+          : { total: 0, documents: [] as Member[] },
+      ]);
 
-      const members = await databases.listDocuments<Member>(
-        DATABASE_ID,
-        MEMBERS_ID,
-        assigneeIds.length > 0 ? [Query.contains("id", assigneeIds)] : []
-      );
-
+      const userCache = new Map<string, { name: string; email: string }>();
       const assignees = await Promise.all(
         members.documents.map(async (member) => {
-          const u = await users.get(member.userId);
-          return {
-            ...member,
-            name: u.name || u.email,
-            email: u.email,
-          };
+          if (member.name && member.email) {
+            return member;
+          }
+          if (userCache.has(member.userId)) {
+            const cached = userCache.get(member.userId)!;
+            return { ...member, name: cached.name, email: cached.email };
+          }
+          try {
+            const u = await users.get(member.userId);
+            const info = { name: u.name || u.email || "Member", email: u.email || "" };
+            userCache.set(member.userId, info);
+            return { ...member, ...info };
+          } catch {
+            return { ...member, name: member.name || "Member", email: member.email || "" };
+          }
         })
       );
 
@@ -345,7 +352,29 @@ const app = new Hono()
 
       const payload: Record<string, unknown> = {};
       if (updates.name !== undefined) payload.name = updates.name;
-      if (updates.status !== undefined) payload.status = updates.status;
+      if (updates.status !== undefined) {
+        if (updates.status === TaskStatus.DONE) {
+          const canVerify =
+            can(profile, "college:tasks.verify") ||
+            (profile.role?.level !== undefined && profile.role.level <= 10);
+
+          if (canVerify) {
+            payload.status = TaskStatus.DONE;
+            payload.verification_status = "APPROVED";
+            payload.verified_at = new Date().toISOString();
+            payload.verified_by = user.$id;
+          } else {
+            // Student / Lead gatekeeper: redirect to IN_REVIEW pending guide verification
+            payload.status = TaskStatus.IN_REVIEW;
+            payload.verification_status = "PENDING_GUIDE_REVIEW";
+          }
+        } else {
+          payload.status = updates.status;
+          if (updates.status === TaskStatus.IN_REVIEW) {
+            payload.verification_status = "PENDING_GUIDE_REVIEW";
+          }
+        }
+      }
       if (updates.description !== undefined) payload.description = updates.description;
       if (updates.projectId !== undefined) payload.projectId = updates.projectId;
       if (updates.dueDate !== undefined) {
@@ -422,17 +451,18 @@ const app = new Hono()
       return deny(c, "tasks:view.all");
     }
 
-    const project = await databases.getDocument<Project>(
-      DATABASE_ID,
-      PROJECTS_ID,
-      task.projectId
-    );
-
-    const member = await databases.getDocument<Member>(
-      DATABASE_ID,
-      MEMBERS_ID,
-      task.assigneeId
-    );
+    const [project, member] = await Promise.all([
+      databases.getDocument<Project>(
+        DATABASE_ID,
+        PROJECTS_ID,
+        task.projectId
+      ),
+      databases.getDocument<Member>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        task.assigneeId
+      ),
+    ]);
 
     const u = await users.get(member.userId);
     const assignee = {
@@ -497,15 +527,36 @@ const app = new Hono()
         return deny(c, "tasks:transition");
       }
 
+      const canVerify =
+        can(profile, "college:tasks.verify") ||
+        (profile.role?.level !== undefined && profile.role.level <= 10);
+
       const updatedTasks = await Promise.all(
         tasks.map(async (task) => {
           const taskId = task.$id || task.id;
           if (!taskId) return null;
+
+          let targetStatus = task.status;
+          const extraFields: Record<string, unknown> = {};
+
+          if (task.status === TaskStatus.DONE) {
+            if (canVerify) {
+              extraFields.verification_status = "APPROVED";
+              extraFields.verified_at = new Date().toISOString();
+              extraFields.verified_by = user.$id;
+            } else {
+              targetStatus = TaskStatus.IN_REVIEW;
+              extraFields.verification_status = "PENDING_GUIDE_REVIEW";
+            }
+          } else if (task.status === TaskStatus.IN_REVIEW) {
+            extraFields.verification_status = "PENDING_GUIDE_REVIEW";
+          }
+
           return databases.updateDocument<Task>(
             DATABASE_ID,
             TASKS_ID,
             taskId,
-            { status: task.status, position: task.position }
+            { status: targetStatus, position: task.position, ...extraFields }
           );
         })
       );
@@ -553,6 +604,7 @@ const app = new Hono()
       authorIds.length > 0 ? [Query.contains("id", authorIds)] : []
     );
 
+    const commentUserCache = new Map<string, { name: string; email: string }>();
     const populatedComments = await Promise.all(
       comments.documents.map(async (comment) => {
         const authorMember = members.documents.find(
@@ -560,12 +612,21 @@ const app = new Hono()
         );
         let authorData = authorMember;
         if (authorMember) {
-          const u = await users.get(authorMember.userId);
-          authorData = {
-            ...authorMember,
-            name: u.name || u.email,
-            email: u.email,
-          };
+          if (authorMember.name && authorMember.email) {
+            authorData = authorMember;
+          } else if (commentUserCache.has(authorMember.userId)) {
+            const cached = commentUserCache.get(authorMember.userId)!;
+            authorData = { ...authorMember, name: cached.name, email: cached.email };
+          } else {
+            try {
+              const u = await users.get(authorMember.userId);
+              const info = { name: u.name || u.email || "Member", email: u.email || "" };
+              commentUserCache.set(authorMember.userId, info);
+              authorData = { ...authorMember, ...info };
+            } catch {
+              authorData = authorMember;
+            }
+          }
         }
         return {
           ...comment,
@@ -717,6 +778,7 @@ const app = new Hono()
       memberIds.length > 0 ? [Query.contains("id", memberIds)] : []
     );
 
+    const actUserCache = new Map<string, { name: string; email: string }>();
     const populatedActivity = await Promise.all(
       activity.documents.map(async (act) => {
         const mem = members.documents.find(
@@ -724,12 +786,21 @@ const app = new Hono()
         );
         let memData = mem;
         if (mem) {
-          const u = await users.get(mem.userId);
-          memData = {
-            ...mem,
-            name: u.name || u.email,
-            email: u.email,
-          };
+          if (mem.name && mem.email) {
+            memData = mem;
+          } else if (actUserCache.has(mem.userId)) {
+            const cached = actUserCache.get(mem.userId)!;
+            memData = { ...mem, name: cached.name, email: cached.email };
+          } else {
+            try {
+              const u = await users.get(mem.userId);
+              const info = { name: u.name || u.email || "Member", email: u.email || "" };
+              actUserCache.set(mem.userId, info);
+              memData = { ...mem, ...info };
+            } catch {
+              memData = mem;
+            }
+          }
         }
         return {
           ...act,

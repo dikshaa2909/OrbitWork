@@ -1,9 +1,10 @@
-import { FolderIcon, ListChecksIcon, UserIcon } from "lucide-react";
+import { FolderIcon, ListChecksIcon, RotateCcw, UserIcon } from "lucide-react";
 
 import { useGetMembers } from "@/features/members/api/use-get-members";
 import { useGetProjects } from "@/features/projects/api/use-get-projects";
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
 
+import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/date-picker";
 import {
   Select,
@@ -46,6 +47,8 @@ export const DataFilters = ({ hideProjectFilter }: DataFiltersProps) => {
     dueDate
   }, setFilters] = useTaskFilters();
 
+  const hasFilters = Boolean(status || assigneeId || projectId || dueDate);
+
   const onStatusChange = (value: string) => {
     setFilters({ status: value === "all" ? null : value as TaskStatus });
   };
@@ -58,7 +61,25 @@ export const DataFilters = ({ hideProjectFilter }: DataFiltersProps) => {
     setFilters({ projectId: value === "all" ? null : value as string });
   };
 
-  if (isLoading) return null;
+  const onReset = () => {
+    setFilters({
+      status: null,
+      assigneeId: null,
+      projectId: null,
+      dueDate: null,
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col lg:flex-row gap-2 animate-pulse">
+        <div className="h-8 w-36 bg-muted rounded-md" />
+        <div className="h-8 w-36 bg-muted rounded-md" />
+        {!hideProjectFilter && <div className="h-8 w-36 bg-muted rounded-md" />}
+        <div className="h-8 w-32 bg-muted rounded-md" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col lg:flex-row gap-2">
@@ -132,6 +153,17 @@ export const DataFilters = ({ hideProjectFilter }: DataFiltersProps) => {
           setFilters({ dueDate: date ? date.toISOString() : null })
         }}
       />
+      {hasFilters && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onReset}
+          className="h-8 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <RotateCcw className="size-3.5 mr-1" />
+          Reset filters
+        </Button>
+      )}
     </div>
   );
 };

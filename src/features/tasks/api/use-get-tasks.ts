@@ -65,6 +65,7 @@ export const useGetTasks = ({
 
       return data;
     },
+    placeholderData: (previousData) => previousData,
   });
 
   return query;

@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Bug, CheckSquare, Bookmark, Zap } from "lucide-react";
+import { Bug, CheckSquare, Bookmark, Zap, Loader2 } from "lucide-react";
 
 import { MemberAvatar } from "@/features/members/components/member-avatar";
 import { ProjectAvatar } from "@/features/projects/components/project-avatar";
@@ -449,7 +449,8 @@ export const EditTaskForm = ({
                 Cancel
               </Button>
               <Button disabled={isPending} type="submit" size="lg">
-                Save Changes
+                {isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
+                {isPending ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </form>

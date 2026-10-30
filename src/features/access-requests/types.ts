@@ -34,6 +34,10 @@ export interface InviteLink {
   maxUses?: number | null;
   uses: number;
   createdBy?: string | null;
+  target_role?: "FACULTY_GUIDE" | "STUDENT_LEAD" | "STUDENT" | "MEMBER" | "ADMIN" | "VIEWER" | null;
+  academic_team_id?: string | null;
+  batch_id?: string | null;
+  created_by_member_id?: string | null;
   revoked: boolean;
   created_at: string;
   // populated

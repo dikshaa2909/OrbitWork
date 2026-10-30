@@ -34,6 +34,12 @@ export enum TaskLinkType {
   DUPLICATED_BY = "DUPLICATED_BY",
 };
 
+export type TaskVerificationStatus =
+  | "NOT_SUBMITTED"
+  | "PENDING_GUIDE_REVIEW"
+  | "CHANGES_REQUESTED"
+  | "APPROVED";
+
 export type Label = DocumentModel & {
   workspaceId: string;
   name: string;
@@ -90,6 +96,11 @@ export type Task = DocumentModel & {
   storyPoints?: number | null;
   estimatedHours?: number | null;
   sprintId?: string | null;
+  verification_status?: TaskVerificationStatus;
+  guide_feedback?: string | null;
+  verified_at?: string | null;
+  verified_by?: string | null;
+  verified_by_member?: Member | null;
   project: Project;
   assignee: Member;
   reporter?: Member;

@@ -16,11 +16,11 @@ export const WorkspaceIdJoinClient = () => {
   }
 
   if (!initialValues) {
-    return <PageError message="Project not found" />
+    return <PageError message="Workspace not found or invite link has expired." />
   }
 
   return (
-    <div className="w-full lg:max-w-xl">
+    <div className="w-full lg:max-w-xl animate-fade-in">
       <JoinWorkspaceForm initialValues={initialValues} />
     </div>
   );

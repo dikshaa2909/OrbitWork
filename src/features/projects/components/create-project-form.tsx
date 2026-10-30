@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { useRef } from "react";
 import Image from "next/image";
-import { ImageIcon } from "lucide-react";
+import { ImageIcon, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -190,7 +190,8 @@ export const CreateProjectForm = ({ onCancel }: CreateProjectFormProps) => {
                 type="submit"
                 size="lg"
               >
-                Create Project
+                {isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
+                {isPending ? "Creating..." : "Create Project"}
               </Button>
             </div>
           </form>

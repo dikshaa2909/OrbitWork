@@ -148,14 +148,18 @@ export function getSupabaseClient(accessToken?: string): SupabaseClient {
   });
 }
 
+let cachedAdminClient: SupabaseClient | null = null;
+
 export function getSupabaseAdminClient(): SupabaseClient {
+  if (cachedAdminClient) return cachedAdminClient;
   const serviceRoleKey = getSupabaseServiceRoleKey();
-  return createClient(SUPABASE_URL, serviceRoleKey, {
+  cachedAdminClient = createClient(SUPABASE_URL, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+  return cachedAdminClient;
 }
 
 export async function getAuthenticatedUser(
@@ -416,10 +420,14 @@ export const createDatabasesClient = (client: SupabaseClient) => {
   };
 };
 
+let cachedAdminDatabases: Databases | null = null;
+
 export function getAdminDatabases(reason?: string): Databases {
   void reason;
+  if (cachedAdminDatabases) return cachedAdminDatabases;
   const adminClient = getSupabaseAdminClient();
-  return createDatabasesClient(adminClient);
+  cachedAdminDatabases = createDatabasesClient(adminClient);
+  return cachedAdminDatabases;
 }
 
 const fileBuffersCache = new Map<string, Buffer>();

@@ -23,16 +23,23 @@ export async function getMemberPermissionProfile(
   workspaceId: string,
   userId: string
 ): Promise<MemberPermissionProfile | null> {
-  // 1. Fetch member
-  const members = await databases.listDocuments<Member & { roleId?: string; reportsToId?: string | null }>(
-    DATABASE_ID,
-    MEMBERS_ID,
-    [
-      Query.equal("workspaceId", workspaceId),
-      Query.equal("userId", userId),
-      Query.limit(1),
-    ]
-  );
+  // 1. Fetch member and workspace in parallel
+  const [members, ws] = await Promise.all([
+    databases.listDocuments<Member & { roleId?: string; reportsToId?: string | null }>(
+      DATABASE_ID,
+      MEMBERS_ID,
+      [
+        Query.equal("workspaceId", workspaceId),
+        Query.equal("userId", userId),
+        Query.limit(1),
+      ]
+    ),
+    databases.getDocument<{ userId?: string }>(
+      DATABASE_ID,
+      WORKSPACES_ID,
+      workspaceId
+    ).catch(() => null),
+  ]);
 
   if (members.total === 0) {
     return null;
@@ -40,38 +47,24 @@ export async function getMemberPermissionProfile(
 
   const member = members.documents[0];
   const memberId = member.$id || member.id;
+  const isWorkspaceOwner = ws?.userId === userId;
   let roleData: RoleData;
 
-  // Check if caller is workspace owner (by creator userId)
-  let isWorkspaceOwner = false;
-  try {
-    const ws = await databases.getDocument<{ userId?: string }>(
-      DATABASE_ID,
-      WORKSPACES_ID,
-      workspaceId
-    );
-    if (ws && ws.userId === userId) {
-      isWorkspaceOwner = true;
-    }
-  } catch {
-    // If table not accessible or lookup fails
-  }
-
-  // 2. Fetch role
+  // 2. Fetch role & role permissions in parallel
   if (member.roleId) {
     try {
-      const roleDoc = await databases.getDocument<RoleData & { $id: string }>(
-        DATABASE_ID,
-        ROLES_ID,
-        member.roleId
-      );
-
-      // Fetch role permissions
-      const permDocs = await databases.listDocuments<{ permissionKey: string; allowed: boolean }>(
-        DATABASE_ID,
-        ROLE_PERMISSIONS_ID,
-        [Query.equal("roleId", member.roleId), Query.equal("allowed", true)]
-      );
+      const [roleDoc, permDocs] = await Promise.all([
+        databases.getDocument<RoleData & { $id: string }>(
+          DATABASE_ID,
+          ROLES_ID,
+          member.roleId
+        ),
+        databases.listDocuments<{ permissionKey: string; allowed: boolean }>(
+          DATABASE_ID,
+          ROLE_PERMISSIONS_ID,
+          [Query.equal("roleId", member.roleId), Query.equal("allowed", true)]
+        ),
+      ]);
 
       const permissions = permDocs.documents.map((p) => p.permissionKey);
 
@@ -108,29 +101,42 @@ export async function getMemberPermissionProfile(
     };
   }
 
-  // 3. Fetch project role overrides
-  const projectOverrides: Record<string, RoleData> = {};
-  try {
-    const projectMemberDocs = await databases.listDocuments<{
+  // 3 & 4. Fetch project overrides and temporary grants in parallel
+  const [projectMemberDocs, grantDocs] = await Promise.all([
+    databases.listDocuments<{
       projectId: string;
       roleId?: string | null;
     }>(DATABASE_ID, PROJECT_MEMBERS_ID, [
       Query.equal("memberId", memberId),
-    ]);
+    ]).catch(() => ({ total: 0, documents: [] as Array<{ projectId: string; roleId?: string | null }> })),
+    databases.listDocuments<PermissionGrantData & { id?: string; $id?: string }>(
+      DATABASE_ID,
+      PERMISSION_GRANTS_ID,
+      [
+        Query.equal("memberId", memberId),
+        Query.equal("revoked", false),
+      ]
+    ).catch(() => ({ total: 0, documents: [] as Array<PermissionGrantData & { id?: string; $id?: string }> })),
+  ]);
 
+  const projectOverrides: Record<string, RoleData> = {};
+  if (projectMemberDocs.documents.length > 0) {
     for (const pm of projectMemberDocs.documents) {
       if (pm.roleId) {
         try {
-          const overrideRole = await databases.getDocument<RoleData & { $id: string }>(
-            DATABASE_ID,
-            ROLES_ID,
-            pm.roleId
-          );
-          const overridePerms = await databases.listDocuments<{ permissionKey: string; allowed: boolean }>(
-            DATABASE_ID,
-            ROLE_PERMISSIONS_ID,
-            [Query.equal("roleId", pm.roleId), Query.equal("allowed", true)]
-          );
+          const [overrideRole, overridePerms] = await Promise.all([
+            databases.getDocument<RoleData & { $id: string }>(
+              DATABASE_ID,
+              ROLES_ID,
+              pm.roleId
+            ),
+            databases.listDocuments<{ permissionKey: string; allowed: boolean }>(
+              DATABASE_ID,
+              ROLE_PERMISSIONS_ID,
+              [Query.equal("roleId", pm.roleId), Query.equal("allowed", true)]
+            ),
+          ]);
+
           projectOverrides[pm.projectId] = {
             id: overrideRole.$id || overrideRole.id,
             name: overrideRole.name,
@@ -144,38 +150,23 @@ export async function getMemberPermissionProfile(
         }
       }
     }
-  } catch {
-    // Table not yet migrated
   }
 
-  // 4. Fetch active temporary grants
   const grants: PermissionGrantData[] = [];
-  try {
-    const grantDocs = await databases.listDocuments<PermissionGrantData & { id?: string; $id?: string }>(
-      DATABASE_ID,
-      PERMISSION_GRANTS_ID,
-      [
-        Query.equal("memberId", memberId),
-        Query.equal("revoked", false),
-      ]
-    );
-    const now = new Date();
-    for (const doc of grantDocs.documents) {
-      if (doc.expiresAt && new Date(doc.expiresAt) <= now) continue;
-      if (doc.usesRemaining !== undefined && doc.usesRemaining !== null && doc.usesRemaining <= 0) continue;
-      grants.push({
-        id: doc.$id || doc.id,
-        permissionKey: doc.permissionKey,
-        grantType: doc.grantType,
-        resourceType: doc.resourceType,
-        resourceId: doc.resourceId,
-        expiresAt: doc.expiresAt,
-        usesRemaining: doc.usesRemaining,
-        revoked: doc.revoked,
-      });
-    }
-  } catch {
-    // Table not yet migrated
+  const now = new Date();
+  for (const doc of grantDocs.documents) {
+    if (doc.expiresAt && new Date(doc.expiresAt) <= now) continue;
+    if (doc.usesRemaining !== undefined && doc.usesRemaining !== null && doc.usesRemaining <= 0) continue;
+    grants.push({
+      id: doc.$id || doc.id,
+      permissionKey: doc.permissionKey,
+      grantType: doc.grantType,
+      resourceType: doc.resourceType,
+      resourceId: doc.resourceId,
+      expiresAt: doc.expiresAt,
+      usesRemaining: doc.usesRemaining,
+      revoked: doc.revoked,
+    });
   }
 
   return {

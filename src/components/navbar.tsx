@@ -2,8 +2,21 @@
 
 import { usePathname } from "next/navigation";
 
+import dynamic from "next/dynamic";
+
 import { UserButton } from "@/features/auth/components/user-button";
 import { NotificationBell } from "@/components/notification-bell";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+const CommandPalette = dynamic(
+  () => import("@/components/command-palette").then((mod) => mod.CommandPalette),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-9 w-40 bg-muted/30 rounded-md animate-pulse hidden md:block" />
+    ),
+  }
+);
 
 import { MobileSidebar } from "./mobile-sidebar";
 
@@ -42,6 +55,8 @@ export const Navbar = () => {
       </div>
       <MobileSidebar />
       <div className="flex items-center gap-x-3">
+        <CommandPalette />
+        <ThemeToggle />
         <NotificationBell />
         <UserButton />
       </div>

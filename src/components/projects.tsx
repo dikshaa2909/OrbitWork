@@ -17,7 +17,7 @@ export const Projects = () => {
   const { open } = useCreateProjectModal();
   const workspaceId = useWorkspaceId();
   const { canCreateProject } = usePermissions(workspaceId);
-  const { data } = useGetProjects({
+  const { data, isLoading } = useGetProjects({
     workspaceId,
   });
 
@@ -33,24 +33,37 @@ export const Projects = () => {
           />
         )}
       </div>
-      {data?.documents.map((project) => {
-        const href = `/workspaces/${workspaceId}/projects/${project.$id}`;
-        const isActive = pathname === href;
+      {isLoading ? (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5 p-2 rounded-md">
+            <div className="size-6 rounded bg-neutral-200 animate-pulse shrink-0" />
+            <div className="h-4 w-28 bg-neutral-200 animate-pulse rounded" />
+          </div>
+          <div className="flex items-center gap-2.5 p-2 rounded-md">
+            <div className="size-6 rounded bg-neutral-200 animate-pulse shrink-0" />
+            <div className="h-4 w-20 bg-neutral-200 animate-pulse rounded" />
+          </div>
+        </div>
+      ) : (
+        data?.documents.map((project) => {
+          const href = `/workspaces/${workspaceId}/projects/${project.$id}`;
+          const isActive = pathname === href;
 
-        return (
-          <Link href={href} key={project.$id}>
-            <div
-              className={cn(
-                "flex items-center gap-2.5 p-2.5 rounded-md hover:opacity-75 transition cursor-pointer text-neutral-500",
-                isActive && "bg-white shadow-sm hover:opacity-100 text-primary"
-              )}
-            >
-              <ProjectAvatar image={project.imageUrl} name={project.name} />
-              <span className="truncate">{project.name}</span>
-            </div>
-          </Link>
-        )
-      })}
+          return (
+            <Link href={href} key={project.$id}>
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 p-2.5 rounded-md hover:opacity-75 transition cursor-pointer text-neutral-500 dark:text-neutral-400 hover:text-primary dark:hover:text-neutral-100",
+                  isActive && "bg-white dark:bg-neutral-800 shadow-sm hover:opacity-100 text-primary dark:text-neutral-100 font-semibold"
+                )}
+              >
+                <ProjectAvatar image={project.imageUrl} name={project.name} />
+                <span className="truncate">{project.name}</span>
+              </div>
+            </Link>
+          );
+        })
+      )}
     </div>
   );
 };

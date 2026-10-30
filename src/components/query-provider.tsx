@@ -14,7 +14,10 @@ function makeQueryClient() {
       queries: {
         // With SSR, we usually want to set some default staleTime
         // above 0 to avoid refetching immediately on the client
-        staleTime: 60 * 1000,
+        staleTime: 5 * 60 * 1000, // 5 minutes — prevents re-fetches on navigation
+        gcTime: 10 * 60 * 1000, // 10 minutes — keep unused cache longer
+        refetchOnWindowFocus: false, // Don't refetch every time user tabs back
+        retry: 1, // Only retry once on failure (default is 3)
       },
     },
   })

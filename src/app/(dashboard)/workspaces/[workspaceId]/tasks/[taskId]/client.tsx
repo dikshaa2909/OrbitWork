@@ -25,7 +25,7 @@ export const TaskIdClient = () => {
   }
 
   return (
-    <div className="flex flex-col gap-y-6">
+    <div className="flex flex-col gap-y-6 animate-fade-in">
       <TaskBreadcrumbs project={data.project} task={data} />
       <DottedSeparator />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

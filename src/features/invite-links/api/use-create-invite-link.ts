@@ -5,6 +5,9 @@ import { client } from "@/lib/rpc";
 interface CreateInviteLinkPayload {
   workspaceId: string;
   roleId?: string;
+  target_role?: "FACULTY_GUIDE" | "STUDENT_LEAD" | "STUDENT" | "MEMBER" | "ADMIN" | "VIEWER";
+  academic_team_id?: string;
+  batch_id?: string;
   label?: string;
   expiresAt?: string;
   maxUses?: number;

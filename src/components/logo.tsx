@@ -16,22 +16,46 @@ export const Logo = ({
   href = "/",
   iconOnly = false,
 }: LogoProps) => {
-  const dimensions = {
-    sm: { width: iconOnly ? 28 : 132, height: iconOnly ? 28 : 32 },
-    md: { width: iconOnly ? 36 : 160, height: iconOnly ? 36 : 38 },
-    lg: { width: iconOnly ? 44 : 188, height: iconOnly ? 44 : 44 },
+  const iconSize = {
+    sm: 26,
+    md: 32,
+    lg: 40,
+  }[size];
+
+  const textSize = {
+    sm: "text-lg",
+    md: "text-xl",
+    lg: "text-2xl",
   }[size];
 
   const content = (
-    <div className={cn("inline-flex items-center gap-2 select-none group transition-opacity hover:opacity-90", className)}>
+    <div
+      className={cn(
+        "inline-flex items-center gap-2.5 select-none group transition-opacity hover:opacity-90",
+        className
+      )}
+    >
       <Image
-        src={iconOnly ? "/icon.svg" : "/logo.svg"}
+        src="/icon.svg"
         alt="OrbitWork"
-        width={dimensions.width}
-        height={dimensions.height}
+        width={iconSize}
+        height={iconSize}
         priority
-        className="object-contain"
+        className="rounded-lg object-contain shrink-0"
       />
+      {!iconOnly && (
+        <span
+          className={cn(
+            "font-extrabold tracking-tight text-foreground",
+            textSize
+          )}
+        >
+          Orbit
+          <span className="bg-gradient-to-r from-blue-600 to-indigo-500 bg-clip-text text-transparent">
+            Work
+          </span>
+        </span>
+      )}
     </div>
   );
 

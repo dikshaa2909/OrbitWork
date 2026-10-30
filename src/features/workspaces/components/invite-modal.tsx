@@ -217,7 +217,7 @@ export const InviteModal = ({
                       Link Label <span className="font-normal">(optional)</span>
                     </label>
                     <Input
-                      placeholder="e.g. Q4 Contractors"
+                      placeholder="e.g. Engineering Cohort or External Mentors"
                       value={linkLabel}
                       onChange={(e) => setLinkLabel(e.target.value)}
                       className="text-xs h-8"

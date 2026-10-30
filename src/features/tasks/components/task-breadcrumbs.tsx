@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRightIcon, TrashIcon } from "lucide-react";
+import { ChevronRightIcon, TrashIcon, ArrowLeft } from "lucide-react";
 
 import { Project } from "@/features/projects/types";
 import { ProjectAvatar } from "@/features/projects/components/project-avatar";
@@ -42,7 +42,8 @@ export const TaskBreadcrumbs = ({
     const ok = await confirm();
     if (!ok) return;
 
-    mutate({ param: { taskId: task.$id } }, {
+    const taskId = task.$id || task.id;
+    mutate({ param: { taskId } }, {
       onSuccess: () => {
         router.push(`/workspaces/${workspaceId}/tasks`);
       },
@@ -52,17 +53,31 @@ export const TaskBreadcrumbs = ({
   return (
     <div className="flex items-center gap-x-2">
       <ConfirmDialog />
-      <ProjectAvatar
-        name={project.name}
-        image={project.imageUrl}
-        className="size-6 lg:size-8"
-      />
-      <Link href={`/workspaces/${workspaceId}/projects/${project.$id}`}>
-        <p className="text-sm lg:text-lg font-semibold text-muted-foreground hover:opacity-75 transition">
-          {project.name}
-        </p>
-      </Link>
-      <ChevronRightIcon className="size-4 lg:size-5 text-muted-foreground" />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.back()}
+        className="gap-1 text-xs text-muted-foreground hover:text-foreground h-8 px-2"
+        title="Back"
+      >
+        <ArrowLeft className="size-4" />
+        <span className="hidden sm:inline">Back</span>
+      </Button>
+      {project && (
+        <>
+          <ProjectAvatar
+            name={project.name}
+            image={project.imageUrl}
+            className="size-6 lg:size-8"
+          />
+          <Link href={`/workspaces/${workspaceId}/projects/${project.$id || project.id}`}>
+            <p className="text-sm lg:text-lg font-semibold text-muted-foreground hover:opacity-75 transition">
+              {project.name}
+            </p>
+          </Link>
+          <ChevronRightIcon className="size-4 lg:size-5 text-muted-foreground" />
+        </>
+      )}
       <p className="text-sm lg:text-lg font-semibold">
         {task.name}
       </p>

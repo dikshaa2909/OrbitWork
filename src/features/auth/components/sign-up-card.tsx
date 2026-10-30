@@ -1,13 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { z } from "zod";
 import Link from "next/link";
 import { FcGoogle } from "react-icons/fc";
-import { FaGithub } from "react-icons/fa";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { signUpWithGithub, signUpWithGoogle } from "@/lib/oauth";
+import { signUpWithGoogle } from "@/lib/oauth";
 import { DottedSeparator } from "@/components/dotted-separator";
 import { Button } from "@/components/ui/button";
 import { 
@@ -31,6 +33,7 @@ import { useRegister } from "../api/use-register";
 
 export const SignUpCard = () => {
   const { mutate, isPending } = useRegister();
+  const [socialLoading, setSocialLoading] = useState<boolean>(false);
 
   const form = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
@@ -43,6 +46,21 @@ export const SignUpCard = () => {
 
   const onSubmit = (values: z.infer<typeof registerSchema>) => {
     mutate({ json: values });
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setSocialLoading(true);
+      await signUpWithGoogle();
+    } catch (err: unknown) {
+      setSocialLoading(false);
+      const message = err instanceof Error ? err.message : "Failed to sign in with Google";
+      if (message.toLowerCase().includes("not enabled")) {
+        toast.error("Google login is not enabled in your Supabase project yet. Please enable Google in Supabase Authentication -> Providers.");
+      } else {
+        toast.error(message);
+      }
+    }
   };
 
   return (
@@ -127,24 +145,18 @@ export const SignUpCard = () => {
       </div>
       <CardContent className="p-7 flex flex-col gap-y-4">
         <Button
-          onClick={() => signUpWithGoogle()}
-          disabled={isPending}
+          onClick={handleGoogleSignIn}
+          disabled={isPending || socialLoading}
           variant="secondary"
           size="lg"
           className="w-full"
         >
-          <FcGoogle className="mr-2 size-5" />
-          Login with Google
-        </Button>
-        <Button
-          onClick={() => signUpWithGithub()}
-          disabled={isPending}
-          variant="secondary"
-          size="lg"
-          className="w-full"
-        >
-          <FaGithub className="mr-2 size-5" />
-          Login with Github
+          {socialLoading ? (
+            <Loader2 className="mr-2 size-5 animate-spin" />
+          ) : (
+            <FcGoogle className="mr-2 size-5" />
+          )}
+          Sign up with Google
         </Button>
       </CardContent>
       <div className="px-7">

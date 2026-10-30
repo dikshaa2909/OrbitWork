@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ColumnDef } from "@tanstack/react-table";
 import {
   ArrowUpDown,
@@ -92,10 +93,17 @@ export const columns: ColumnDef<Task>[] = [
     cell: ({ row }) => {
       const name = row.original.name;
       const storyPoints = row.original.storyPoints;
+      const workspaceId = row.original.workspaceId;
+      const taskId = row.original.$id || row.original.id;
 
       return (
         <div className="flex items-center gap-x-2">
-          <p className="line-clamp-1 font-medium">{name}</p>
+          <Link
+            href={`/workspaces/${workspaceId}/tasks/${taskId}`}
+            className="line-clamp-1 font-medium hover:text-primary transition"
+          >
+            {name}
+          </Link>
           {storyPoints !== null && storyPoints !== undefined && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-semibold">
               {storyPoints} pts
@@ -128,6 +136,7 @@ export const columns: ColumnDef<Task>[] = [
     },
     cell: ({ row }) => {
       const project = row.original.project;
+      if (!project) return <span className="text-muted-foreground italic text-xs">No project</span>;
 
       return (
         <div className="flex items-center gap-x-2 text-sm font-medium">
@@ -156,6 +165,7 @@ export const columns: ColumnDef<Task>[] = [
     },
     cell: ({ row }) => {
       const assignee = row.original.assignee;
+      if (!assignee) return <span className="text-muted-foreground italic text-xs">Unassigned</span>;
 
       return (
         <div className="flex items-center gap-x-2 text-sm font-medium">

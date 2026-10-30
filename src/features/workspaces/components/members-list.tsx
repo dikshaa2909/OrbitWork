@@ -15,7 +15,10 @@ import { useTransferOwnership } from "@/features/workspaces/api/use-transfer-own
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
 import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useGetGuideGroups } from "@/features/college/api/use-get-guide-groups";
 import { InviteModal } from "./invite-modal";
+import { InviteFacultyDialog } from "@/features/college/components/invite-faculty-dialog";
+import { InviteGroupStudentsDialog } from "@/features/college/components/invite-group-students-dialog";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,11 +38,16 @@ export const MembersList = () => {
   const router = useRouter();
   const workspaceId = useWorkspaceId();
   const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [isCollegeInviteOpen, setIsCollegeInviteOpen] = useState(false);
   const { canManageMembers } = usePermissions(workspaceId);
   const { data: workspace } = useGetWorkspace({ workspaceId });
   const { data: currentMember } = useCurrentMember({ workspaceId });
+  const { data: guideGroups = [] } = useGetGuideGroups({ workspaceId });
 
+  const isCollege = workspace?.type === "COLLEGE";
   const isCurrentUserOwner = Boolean(workspace && currentMember && workspace.userId === currentMember.userId);
+  const isHod = isCurrentUserOwner || canManageMembers;
+  const isGuide = guideGroups.length > 0;
   const currentMemberId = currentMember?.$id || currentMember?.id;
 
   const [RemoveConfirmDialog, confirmRemove] = useConfirm(
@@ -118,12 +126,33 @@ export const MembersList = () => {
       <RemoveConfirmDialog />
       <LeaveConfirmDialog />
       <TransferConfirmDialog />
-      <InviteModal
-        isOpen={isInviteOpen}
-        setIsOpen={setIsInviteOpen}
-        workspaceId={workspaceId}
-        inviteCode={workspace?.inviteCode || ""}
-      />
+      {!isCollege && (
+        <InviteModal
+          isOpen={isInviteOpen}
+          setIsOpen={setIsInviteOpen}
+          workspaceId={workspaceId}
+          inviteCode={workspace?.inviteCode || ""}
+        />
+      )}
+      {isCollege && isHod && (
+        <InviteFacultyDialog
+          isOpen={isCollegeInviteOpen}
+          onClose={() => setIsCollegeInviteOpen(false)}
+          workspaceId={workspaceId}
+          departmentName={workspace?.name}
+        />
+      )}
+      {isCollege && !isHod && isGuide && guideGroups[0] && (
+        <InviteGroupStudentsDialog
+          isOpen={isCollegeInviteOpen}
+          onClose={() => setIsCollegeInviteOpen(false)}
+          workspaceId={workspaceId}
+          teamId={guideGroups[0].id}
+          teamCode={guideGroups[0].team_code}
+          teamTitle={guideGroups[0].title}
+          batchId={guideGroups[0].batch_id}
+        />
+      )}
       <CardHeader className="flex flex-row items-center justify-between p-7 space-y-0">
         <div className="flex items-center gap-x-4">
           <Button asChild variant="secondary" size="sm">
@@ -133,14 +162,28 @@ export const MembersList = () => {
             </Link>
           </Button>
           <CardTitle className="text-xl font-bold">
-            Members list
+            {isCollege ? "Department Roster & Directory" : "Members list"}
           </CardTitle>
         </div>
-        {canManageMembers && (
-          <Button onClick={() => setIsInviteOpen(true)} size="sm">
-            <UserPlus className="size-4 mr-2" />
-            Invite Member
-          </Button>
+        {isCollege ? (
+          isHod ? (
+            <Button onClick={() => setIsCollegeInviteOpen(true)} size="sm">
+              <UserPlus className="size-4 mr-2" />
+              Invite Faculty Guide
+            </Button>
+          ) : isGuide ? (
+            <Button onClick={() => setIsCollegeInviteOpen(true)} size="sm">
+              <UserPlus className="size-4 mr-2" />
+              Invite Students to Group
+            </Button>
+          ) : null
+        ) : (
+          canManageMembers && (
+            <Button onClick={() => setIsInviteOpen(true)} size="sm">
+              <UserPlus className="size-4 mr-2" />
+              Invite Member
+            </Button>
+          )
         )}
       </CardHeader>
       <div className="px-7">
@@ -151,27 +194,41 @@ export const MembersList = () => {
           const isSelf = (member.$id || member.id) === currentMemberId;
           const isTargetOwner = Boolean(workspace && member && workspace.userId === member.userId);
           const memberId = member.$id || member.id;
-          const displayRole = (member as unknown as { roleName?: string }).roleName || (isTargetOwner ? "OWNER" : member.role);
+          const rawRole = (member as unknown as { roleName?: string }).roleName || (isTargetOwner ? "OWNER" : member.role);
+          
+          const displayRole = isCollege
+            ? rawRole.toLowerCase() === "owner"
+              ? "HOD / Dept Head"
+              : rawRole.toLowerCase() === "admin"
+              ? "Dept Coordinator"
+              : rawRole.toLowerCase().includes("guide") || rawRole.toLowerCase().includes("manager") || rawRole.toLowerCase() === "pm"
+              ? "Faculty Guide"
+              : rawRole.toLowerCase().includes("lead")
+              ? "Student Team Lead"
+              : rawRole.toLowerCase().includes("viewer")
+              ? "External Examiner"
+              : "Student Member"
+            : rawRole;
 
           return (
             <Fragment key={memberId}>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <MemberAvatar
-                  className="size-10"
+                  className="size-10 shrink-0"
                   fallbackClassName="text-lg"
                   name={member.name}
                 />
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-x-2">
-                    <p className="text-sm font-medium">
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-x-2 flex-wrap">
+                    <p className="text-sm font-medium truncate max-w-[200px] sm:max-w-xs">
                       {member.name}
                       {isSelf && <span className="text-xs text-muted-foreground ml-1.5">(You)</span>}
                     </p>
-                    <Badge variant="secondary" className="text-[10px] uppercase font-semibold">
+                    <Badge variant="secondary" className="text-[10px] uppercase font-semibold shrink-0">
                       {displayRole}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground">{member.email}</p>
+                  <p className="text-xs text-muted-foreground truncate max-w-[240px] sm:max-w-md">{member.email}</p>
                 </div>
 
                 <div className="ml-auto flex items-center gap-2">
@@ -219,41 +276,69 @@ export const MembersList = () => {
                         {/* Role management for admins and owners */}
                         {canManageMembers && !isTargetOwner && (
                           <>
-                            <DropdownMenuItem
-                              className="font-medium"
-                              onClick={() => handleUpdateMember(memberId, MemberRole.ADMIN)}
-                              disabled={displayRole.toLowerCase().includes("admin")}
-                            >
-                              Set as Administrator
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="font-medium"
-                              onClick={() => handleUpdateMember(memberId, MemberRole.PROJECT_MANAGER)}
-                              disabled={displayRole.toLowerCase().includes("manager") || displayRole.toLowerCase() === "pm"}
-                            >
-                              Set as Project Manager
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="font-medium"
-                              onClick={() => handleUpdateMember(memberId, MemberRole.MEMBER)}
-                              disabled={displayRole.toLowerCase() === "member"}
-                            >
-                              Set as Member
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="font-medium"
-                              onClick={() => handleUpdateMember(memberId, MemberRole.VIEWER)}
-                              disabled={displayRole.toLowerCase().includes("viewer")}
-                            >
-                              Set as Viewer
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="font-medium"
-                              onClick={() => handleUpdateMember(memberId, MemberRole.GUEST)}
-                              disabled={displayRole.toLowerCase().includes("guest")}
-                            >
-                              Set as Guest
-                            </DropdownMenuItem>
+                            {isCollege ? (
+                              <>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.ADMIN)}
+                                  disabled={displayRole.toLowerCase().includes("coordinator")}
+                                >
+                                  Set as Department Coordinator
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.PROJECT_MANAGER)}
+                                  disabled={displayRole.toLowerCase().includes("guide")}
+                                >
+                                  Set as Faculty Project Guide
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.MEMBER)}
+                                  disabled={displayRole.toLowerCase().includes("student")}
+                                >
+                                  Set as Student Member
+                                </DropdownMenuItem>
+                              </>
+                            ) : (
+                              <>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.ADMIN)}
+                                  disabled={displayRole.toLowerCase().includes("admin")}
+                                >
+                                  Set as Administrator
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.PROJECT_MANAGER)}
+                                  disabled={displayRole.toLowerCase().includes("manager") || displayRole.toLowerCase() === "pm"}
+                                >
+                                  Set as Project Manager
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.MEMBER)}
+                                  disabled={displayRole.toLowerCase() === "member"}
+                                >
+                                  Set as Member
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.VIEWER)}
+                                  disabled={displayRole.toLowerCase().includes("viewer")}
+                                >
+                                  Set as Viewer
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="font-medium"
+                                  onClick={() => handleUpdateMember(memberId, MemberRole.GUEST)}
+                                  disabled={displayRole.toLowerCase().includes("guest")}
+                                >
+                                  Set as Guest
+                                </DropdownMenuItem>
+                              </>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="font-medium text-destructive focus:text-destructive"

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SYSTEM_ROLE_TEMPLATES, HIERARCHY_LEVELS } from "@/lib/permissions/catalog";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { useCreateRole } from "../api/use-create-role";
 
 interface CreateRoleDialogProps {
@@ -49,6 +50,9 @@ export const CreateRoleDialog: React.FC<CreateRoleDialogProps> = ({
   onOpenChange,
   workspaceId,
 }) => {
+  const { data: workspace } = useGetWorkspace({ workspaceId });
+  const isCollege = workspace?.type === "COLLEGE";
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [level, setLevel] = useState<number>(HIERARCHY_LEVELS.MEMBER);
@@ -122,11 +126,22 @@ export const CreateRoleDialog: React.FC<CreateRoleDialogProps> = ({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="CUSTOM">Blank (start from scratch)</SelectItem>
-                {TEMPLATE_ENTRIES.map(([key, tmpl]) => (
-                  <SelectItem key={key} value={key}>
-                    {tmpl.name} (L{tmpl.level})
-                  </SelectItem>
-                ))}
+                {TEMPLATE_ENTRIES.filter(([k]) => !isCollege || k !== "GUEST").map(([key, tmpl]) => {
+                  let displayName = tmpl.name;
+                  if (isCollege) {
+                    if (key === "OWNER") displayName = "HOD / Department Head";
+                    if (key === "ADMIN") displayName = "Academic Coordinator";
+                    if (key === "PROJECT_MANAGER") displayName = "Faculty Project Guide";
+                    if (key === "TEAM_LEAD") displayName = "Student Team Lead";
+                    if (key === "MEMBER") displayName = "Student Member";
+                    if (key === "VIEWER") displayName = "External Examiner";
+                  }
+                  return (
+                    <SelectItem key={key} value={key}>
+                      {displayName} (L{tmpl.level})
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -135,7 +150,11 @@ export const CreateRoleDialog: React.FC<CreateRoleDialogProps> = ({
             <Label htmlFor="role-name">Role Name *</Label>
             <Input
               id="role-name"
-              placeholder="e.g. Lead Engineer, Senior QA, Product Designer"
+              placeholder={
+                isCollege
+                  ? "e.g. Lab Assistant, Senior Faculty Mentor, External Evaluator"
+                  : "e.g. Lead Engineer, Senior QA, Product Designer"
+              }
               value={name}
               onChange={(e) => setName(e.target.value)}
             />

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Key, Send, CheckCircle2 } from "lucide-react";
+import { Key, Send, CheckCircle2, Loader2 } from "lucide-react";
 import { ResponsiveModal } from "@/components/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -166,8 +166,17 @@ export const RequestAccessDialog: React.FC<RequestAccessDialogProps> = ({
                 Cancel
               </Button>
               <Button type="submit" size="sm" disabled={isPending} className="gap-1.5">
-                <Send className="size-3.5" />
-                {isPending ? "Submitting..." : "Submit Request"}
+                {isPending ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="size-3.5" />
+                    Submit Request
+                  </>
+                )}
               </Button>
             </div>
           </form>

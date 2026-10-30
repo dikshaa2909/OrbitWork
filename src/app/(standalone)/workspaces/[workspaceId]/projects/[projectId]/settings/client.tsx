@@ -22,8 +22,8 @@ export const ProjectIdSettingsClient = () => {
   }
 
   return (
-    <PermissionGuard action="edit_project" workspaceId={initialValues.workspaceId}>
-      <div className="w-full lg:max-w-2xl space-y-6">
+    <PermissionGuard action="projects:edit" workspaceId={initialValues.workspaceId}>
+      <div className="w-full lg:max-w-2xl space-y-6 animate-fade-in">
         <EditProjectForm initialValues={initialValues} />
         <ProjectMembersOverride
           projectId={projectId}

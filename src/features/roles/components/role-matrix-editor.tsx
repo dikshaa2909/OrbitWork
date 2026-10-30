@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Search, Save, Undo, Eye, Copy, Trash2, Shield, Lock, Check } from "lucide-react";
+import { Search, Save, Undo, Eye, Copy, Trash2, Shield, Lock, Check, Loader2 } from "lucide-react";
 import { Role } from "../types";
 import {
   PERMISSION_CATEGORIES,
@@ -240,8 +240,17 @@ export const RoleMatrixEditor: React.FC<RoleMatrixEditorProps> = ({
               disabled={isPending}
               className="h-8 text-xs gap-1 font-semibold"
             >
-              <Save className="size-3.5" />
-              {isPending ? "Saving..." : "Save Changes"}
+              {isPending ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="size-3.5" />
+                  Save Changes
+                </>
+              )}
             </Button>
           </div>
         )}

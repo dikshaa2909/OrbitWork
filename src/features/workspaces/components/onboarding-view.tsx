@@ -2,12 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
 import {
-  Building2,
   Users2,
   ArrowRight,
   Loader2,
@@ -25,19 +21,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
 import { client } from "@/lib/rpc";
 
 import { WorkspaceAvatar } from "./workspace-avatar";
-import { createWorkspaceSchema } from "../schemas";
-import { useCreateWorkspace } from "../api/use-create-workspace";
+import { CreateWorkspaceForm } from "./create-workspace-form";
 import { useJoinWorkspace } from "../api/use-join-workspace";
 
 interface WorkspacePreview {
@@ -51,30 +38,6 @@ interface WorkspacePreview {
 
 export const OnboardingView = () => {
   const router = useRouter();
-
-  // Create Workspace Form
-  const { mutate: createWorkspace, isPending: isCreating } = useCreateWorkspace();
-  const form = useForm<z.infer<typeof createWorkspaceSchema>>({
-    resolver: zodResolver(createWorkspaceSchema),
-    defaultValues: {
-      name: "",
-    },
-  });
-
-  const onCreateSubmit = (values: z.infer<typeof createWorkspaceSchema>) => {
-    createWorkspace(
-      { form: values },
-      {
-        onSuccess: ({ data }) => {
-          toast.success(`Workspace "${data.name}" created successfully!`);
-          router.push(`/workspaces/${data.$id}`);
-        },
-        onError: (err) => {
-          toast.error(err.message || "Failed to create workspace");
-        },
-      }
-    );
-  };
 
   // Join Workspace State
   const [inviteInput, setInviteInput] = useState("");
@@ -223,62 +186,10 @@ export const OnboardingView = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        {/* Card 1: Create a workspace */}
-        <Card className="flex flex-col h-full border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md transition">
-          <CardHeader className="p-6 pb-4">
-            <div className="size-10 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center mb-3">
-              <Building2 className="size-5" />
-            </div>
-            <CardTitle className="text-xl font-bold">Create a workspace</CardTitle>
-            <CardDescription>
-              Create a dedicated workspace for your company, team, or personal projects.
-            </CardDescription>
-          </CardHeader>
-          <div className="px-6">
-            <DottedSeparator />
-          </div>
-          <CardContent className="p-6 flex-1 flex flex-col justify-between">
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onCreateSubmit)} className="space-y-4 flex-1 flex flex-col justify-between">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Workspace Name</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="e.g. Acme Engineering, Design Ops"
-                          disabled={isCreating}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <Button
-                  type="submit"
-                  size="lg"
-                  className="w-full mt-4"
-                  disabled={isCreating || !form.watch("name")?.trim()}
-                >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="size-4 mr-2 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      Create Workspace
-                      <ArrowRight className="size-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
+        {/* Card 1: Create a workspace (Full 2-Step Upfront Flow) */}
+        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-card shadow-sm hover:shadow-md transition overflow-hidden">
+          <CreateWorkspaceForm />
+        </div>
 
         {/* Card 2: Join a workspace */}
         <Card className="flex flex-col h-full border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md transition">

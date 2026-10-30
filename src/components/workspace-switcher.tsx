@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { RiAddCircleFill } from "react-icons/ri";
 import { Plus, UserPlus } from "lucide-react";
 
@@ -24,6 +25,7 @@ import {
 export const WorkspaceSwitcher = () => {
   const workspaceId = useWorkspaceId();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: workspaces } = useGetWorkspaces();
   const { open } = useCreateWorkspaceModal();
   const { role } = usePermissions(workspaceId);
@@ -45,7 +47,7 @@ export const WorkspaceSwitcher = () => {
       return;
     }
     if (value === "action:join") {
-      router.push("/workspaces/create?tab=join");
+      router.push("/join");
       return;
     }
 
@@ -55,6 +57,7 @@ export const WorkspaceSwitcher = () => {
     } catch {
       // ignore
     }
+    queryClient.invalidateQueries();
     router.push(`/workspaces/${value}`);
   };
 
@@ -68,7 +71,7 @@ export const WorkspaceSwitcher = () => {
           {role && (
             <Badge
               variant="secondary"
-              className="text-[9px] uppercase font-bold tracking-tight py-0 px-1.5 h-4 bg-neutral-200/80 text-neutral-700"
+              className="text-[9px] uppercase font-bold tracking-tight py-0 px-1.5 h-4 bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
             >
               {role}
             </Badge>
@@ -81,7 +84,7 @@ export const WorkspaceSwitcher = () => {
         />
       </div>
       <Select onValueChange={onSelect} value={workspaceId}>
-        <SelectTrigger className="w-full bg-neutral-200 font-medium p-1">
+        <SelectTrigger className="w-full bg-neutral-200 dark:bg-neutral-800 text-foreground font-medium p-1 border border-border">
           <SelectValue placeholder="No workspace selected" />
         </SelectTrigger>
         <SelectContent>

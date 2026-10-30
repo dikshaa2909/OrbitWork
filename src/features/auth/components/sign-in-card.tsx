@@ -1,14 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { z } from "zod";
 import Link from "next/link";
 import { FcGoogle } from "react-icons/fc";
-import { FaGithub } from "react-icons/fa";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { signUpWithGithub, signUpWithGoogle } from "@/lib/oauth";
+import { signUpWithGoogle } from "@/lib/oauth";
 import { DottedSeparator } from "@/components/dotted-separator";
 import { Button } from "@/components/ui/button";
 import { 
@@ -33,6 +32,9 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
+
 import { loginSchema } from "../schemas";
 import { useLogin } from "../api/use-login";
 import { useResetPassword } from "../api/use-reset-password";
@@ -42,6 +44,35 @@ export const SignInCard = () => {
   const { mutate: resetPassword, isPending: isResetting } = useResetPassword();
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
+  const [socialLoading, setSocialLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const error = params.get("error");
+      if (error) {
+        toast.error(decodeURIComponent(error));
+        // Remove error query param from URL without reload
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, "", newUrl);
+      }
+    }
+  }, []);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setSocialLoading(true);
+      await signUpWithGoogle();
+    } catch (err: unknown) {
+      setSocialLoading(false);
+      const message = err instanceof Error ? err.message : "Failed to sign in with Google";
+      if (message.toLowerCase().includes("not enabled")) {
+        toast.error("Google login is not enabled in your Supabase project yet. Please enable Google in Supabase Authentication -> Providers.");
+      } else {
+        toast.error(message);
+      }
+    }
+  };
 
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -167,24 +198,18 @@ export const SignInCard = () => {
       </div>
       <CardContent className="p-7 flex flex-col gap-y-4">
         <Button
-          onClick={() => signUpWithGoogle()}
-          disabled={isPending}
+          onClick={handleGoogleSignIn}
+          disabled={isPending || socialLoading}
           variant="secondary"
           size="lg"
           className="w-full"
         >
-          <FcGoogle className="mr-2 size-5" />
+          {socialLoading ? (
+            <Loader2 className="mr-2 size-5 animate-spin" />
+          ) : (
+            <FcGoogle className="mr-2 size-5" />
+          )}
           Login with Google
-        </Button>
-        <Button
-          onClick={() => signUpWithGithub()}
-          disabled={isPending}
-          variant="secondary"
-          size="lg"
-          className="w-full"
-        >
-          <FaGithub className="mr-2 size-5" />
-          Login with Github
         </Button>
       </CardContent>
       <div className="px-7">

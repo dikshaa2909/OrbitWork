@@ -4,10 +4,27 @@ import { useState } from "react";
 import { MessageSquare, Send } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
+import dynamic from "next/dynamic";
+
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { MemberAvatar } from "@/features/members/components/member-avatar";
 import { DottedSeparator } from "@/components/dotted-separator";
+import { RichTextViewer } from "@/components/editor/rich-text-viewer";
+
+const RichTextEditor = dynamic(
+  () =>
+    import("@/components/editor/rich-text-editor").then(
+      (mod) => mod.RichTextEditor
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-28 w-full bg-muted/20 border rounded-md animate-pulse p-4 text-xs text-muted-foreground flex items-center justify-center">
+        Loading editor...
+      </div>
+    ),
+  }
+);
 
 import { usePermissions } from "@/hooks/use-permissions";
 import { useGetComments } from "../api/use-get-comments";
@@ -40,7 +57,7 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
   const comments = data?.documents || [];
 
   return (
-    <div className="p-4 border rounded-lg bg-card">
+    <div className="p-4 border rounded-lg bg-card text-card-foreground">
       <div className="flex items-center gap-x-2">
         <MessageSquare className="size-5 text-muted-foreground" />
         <p className="text-lg font-semibold">Comments</p>
@@ -50,16 +67,15 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
       </div>
       <DottedSeparator className="my-4" />
 
-      {/* Comment Input */}
+      {/* Comment Input with Rich Text Editor */}
       {can("comment") ? (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-y-2 mb-6">
-          <Textarea
-            placeholder="Add a comment or @mention a team member..."
+        <form onSubmit={handleSubmit} className="flex flex-col gap-y-3 mb-6">
+          <RichTextEditor
+            placeholder="Add a comment or type '@' to mention a teammate..."
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={3}
+            onChange={setContent}
             disabled={isPending}
-            className="resize-none text-sm"
+            minHeight="90px"
           />
           <div className="flex justify-end">
             <Button
@@ -99,7 +115,7 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
                 name={comment.author?.name || "Member"}
                 className="size-8 mt-0.5"
               />
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-foreground">
                     {comment.author?.name || "Member"}
@@ -113,9 +129,9 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
                       : ""}
                   </span>
                 </div>
-                <p className="text-sm text-foreground/90 mt-1 whitespace-pre-wrap">
-                  {comment.content}
-                </p>
+                <div className="mt-1">
+                  <RichTextViewer content={comment.content} />
+                </div>
               </div>
             </div>
           ))}

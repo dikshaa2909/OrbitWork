@@ -7,7 +7,7 @@ export const TeamsClient = () => {
   const workspaceId = useWorkspaceId();
 
   return (
-    <div className="w-full max-w-6xl mx-auto">
+    <div className="w-full max-w-6xl mx-auto animate-fade-in">
       <TeamsView workspaceId={workspaceId} />
     </div>
   );

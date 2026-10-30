@@ -21,8 +21,27 @@ export interface PermissionContext {
   isOwn?: boolean;
 }
 
+export const LEGACY_KEY_MAP: Record<string, string> = {
+  edit_workspace: "workspace:settings.edit",
+  edit_project: "projects:edit",
+  delete_workspace: "workspace:delete",
+  delete_project: "projects:delete",
+  manage_members: "members:roles.assign",
+  create_project: "projects:create",
+  create_task: "tasks:create",
+  edit_task: "tasks:edit.any",
+  delete_task: "tasks:delete.any",
+  delete_comment: "comments:delete.any",
+  view_everything: "tasks:view.all",
+};
+
+export function normalizePermissionKey(key: string): string {
+  return LEGACY_KEY_MAP[key] || key;
+}
+
 export function getPermissionDeniedReason(actionOrKey: string): string {
-  const cat = PERMISSIONS_CATALOG.find((p) => p.key === actionOrKey);
+  const normalizedKey = normalizePermissionKey(actionOrKey);
+  const cat = PERMISSIONS_CATALOG.find((p) => p.key === normalizedKey);
   if (cat) return `Requires '${cat.name}' permission: ${cat.description}`;
   return "You do not have permission to perform this action";
 }
@@ -97,7 +116,7 @@ export function usePermissions(
         // Owner level 0 (system role) has bypass across everything
         if (effectiveData.role.isSystem && effectiveData.role.level === 0) return true;
 
-        const catalogKey = actionOrKey;
+        const catalogKey = normalizePermissionKey(actionOrKey);
 
         // Check ownership context for tasks or comments
         if (catalogKey === "tasks:edit" || catalogKey === "tasks:edit.any" || actionOrKey === "edit_task") {

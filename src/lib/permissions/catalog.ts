@@ -24,6 +24,7 @@ export type PermissionCategory =
   | "requests"
   | "invites"
   | "chat"
+  | "college"
   | "ai"
   | "audit";
 
@@ -41,6 +42,7 @@ export const PERMISSION_CATEGORIES: { id: PermissionCategory; name: string; desc
   { id: "requests", name: "Access Requests", description: "Reviewing and approving permission requests" },
   { id: "invites", name: "Invite Links", description: "Creating and managing role-bound workspace invite links" },
   { id: "chat", name: "Team Chat", description: "Channel creation, moderation, and messaging" },
+  { id: "college", name: "Academic & College", description: "Batches, student teams, milestone reviews, and rubric grading" },
   { id: "ai", name: "AI Assistant", description: "Access to AI tools and task summaries" },
   { id: "audit", name: "Audit Logs", description: "Viewing security and permission change logs" },
 ];
@@ -110,6 +112,24 @@ export const PERMISSIONS_CATALOG: PermissionDefinition[] = [
   { key: "chat:channels.create", category: "chat", name: "Create Channels", description: "Create public and private team chat channels" },
   { key: "chat:channels.moderate", category: "chat", name: "Moderate Channels", description: "Delete inappropriate messages and manage channel members" },
   { key: "chat:dm", category: "chat", name: "Direct Messaging", description: "Send 1-on-1 and group direct messages" },
+  { key: "chat:channels.view_all", category: "chat", name: "View All Channels", description: "View all project and team channels in the workspace (DMs remain private)" },
+
+  // College & Academic Project Management
+  { key: "college:batches.manage", category: "college", name: "Manage Batches", description: "Create and configure academic batches and academic years" },
+  { key: "college:teams.create", category: "college", name: "Create Academic Groups", description: "Faculty Guide self-service creation of capstone project groups" },
+  { key: "college:teams.self_assign", category: "college", name: "Self-Assign as Guide", description: "Automatically claim and assign oneself as the faculty guide for created groups" },
+  { key: "college:teams.invite_students", category: "college", name: "Generate Student Codes", description: "Generate team-bound student join codes for a project group" },
+  { key: "college:teams.manage_members", category: "college", name: "Manage Group Students", description: "Promote student to Team Lead or manage team membership" },
+  { key: "college:teams.manage", category: "college", name: "Manage Academic Teams", description: "Register student project groups and assign rosters" },
+  { key: "college:groups.manage", category: "college", name: "Manage Groups & Guides", description: "Department HOD allocation of faculty guides and capstone groups" },
+  { key: "college:groups.lead", category: "college", name: "Lead Academic Group", description: "Team Lead creation of group tasks and teammate work allocation" },
+  { key: "college:guides.assign", category: "college", name: "Assign Faculty Guides", description: "Assign faculty guides and co-guides to project teams" },
+  { key: "college:milestones.manage", category: "college", name: "Manage Milestones", description: "Schedule reviews, defense cycles, and submission deadlines" },
+  { key: "college:submissions.submit", category: "college", name: "Submit Work", description: "Upload reports, code links, and milestone deliverables" },
+  { key: "college:submissions.review", category: "college", name: "Review Submissions", description: "Inspect submitted deliverables and request revisions" },
+  { key: "college:tasks.verify", category: "college", name: "Verify & Approve Tasks", description: "Faculty Guide review and sign-off on completed student tasks" },
+  { key: "college:evaluations.grade", category: "college", name: "Grade Rubrics", description: "Score rubric criteria and submit evaluation marks" },
+  { key: "college:reports.export", category: "college", name: "Export Grade Sheet", description: "Download consolidated batch marksheet and grade rosters" },
 
   // AI
   { key: "ai:use", category: "ai", name: "Use AI Assistant", description: "Generate task summaries, breakdown requirements, and use AI features" },
@@ -193,6 +213,46 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, SystemRoleTemplate> = {
       "chat:channels.create",
       "chat:channels.moderate",
       "chat:dm",
+      "college:teams.create",
+      "college:teams.self_assign",
+      "college:teams.invite_students",
+      "college:teams.manage_members",
+      "college:groups.manage",
+      "college:tasks.verify",
+      "college:submissions.review",
+      "college:evaluations.grade",
+      "college:reports.export",
+      "ai:use",
+    ],
+  },
+  FACULTY_GUIDE: {
+    name: "Faculty Project Guide",
+    description: "Faculty supervisor with autonomy to create project groups, guide students, verify tasks, and score defenses.",
+    color: "#8b5cf6", // Purple 500
+    level: HIERARCHY_LEVELS.PROJECT_MANAGER,
+    isSystem: true,
+    permissions: [
+      "members:view",
+      "tasks:create",
+      "tasks:view.all",
+      "tasks:edit.any",
+      "tasks:transition",
+      "comments:create",
+      "comments:delete.own",
+      "reports:view",
+      "reports:export",
+      "chat:channels.create",
+      "chat:channels.moderate",
+      "chat:dm",
+      "college:teams.create",
+      "college:teams.self_assign",
+      "college:teams.invite_students",
+      "college:teams.manage_members",
+      "college:groups.manage",
+      "college:tasks.verify",
+      "college:submissions.review",
+      "college:evaluations.grade",
+      "college:reports.export",
       "ai:use",
     ],
   },
@@ -221,6 +281,8 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, SystemRoleTemplate> = {
       "time:approve_timesheets",
       "chat:channels.create",
       "chat:dm",
+      "college:groups.lead",
+      "college:submissions.submit",
       "ai:use",
     ],
   },
@@ -242,6 +304,8 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, SystemRoleTemplate> = {
       "reports:view",
       "time:log_own",
       "chat:dm",
+      "college:groups.lead",
+      "college:submissions.submit",
       "ai:use",
     ],
   },

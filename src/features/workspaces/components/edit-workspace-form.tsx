@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeftIcon, CopyIcon, ImageIcon } from "lucide-react";
+import { ArrowLeftIcon, CopyIcon, ImageIcon, Rocket, GraduationCap, Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -69,6 +69,7 @@ export const EditWorkspaceForm = ({ onCancel, initialValues }: EditWorkspaceForm
     resolver: zodResolver(updateWorkspaceSchema),
     defaultValues: {
       ...initialValues,
+      type: initialValues.type || "STARTUP",
       image: initialValues.imageUrl ?? "",
     },
   });
@@ -118,7 +119,9 @@ export const EditWorkspaceForm = ({ onCancel, initialValues }: EditWorkspaceForm
     }
   };
 
-  const fullInviteLink = `${window.location.origin}/workspaces/${initialValues.$id}/join/${initialValues.inviteCode}`;
+  const fullInviteLink = typeof window !== "undefined"
+    ? `${window.location.origin}/workspaces/${initialValues.$id}/join/${initialValues.inviteCode}`
+    : "";
 
   const handleCopyInviteLink = () => {
     navigator.clipboard.writeText(fullInviteLink)
@@ -159,6 +162,69 @@ export const EditWorkspaceForm = ({ onCancel, initialValues }: EditWorkspaceForm
                           placeholder="Enter workspace name"
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Workspace Archetype</FormLabel>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div
+                          onClick={() => field.onChange("STARTUP")}
+                          className={`cursor-pointer rounded-lg border p-3.5 transition-all flex flex-col justify-between ${
+                            field.value === "STARTUP"
+                              ? "border-primary bg-primary/5 ring-1 ring-primary"
+                              : "border-border hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="size-8 rounded-md bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
+                              <Rocket className="size-4" />
+                            </div>
+                            {field.value === "STARTUP" && (
+                              <Check className="size-4 text-primary" />
+                            )}
+                          </div>
+                          <div className="mt-3">
+                            <p className="font-semibold text-xs text-foreground">
+                              Tech Startup / Agile
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                              Kanban, 2-week sprints, story points, and task boards.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div
+                          onClick={() => field.onChange("COLLEGE")}
+                          className={`cursor-pointer rounded-lg border p-3.5 transition-all flex flex-col justify-between ${
+                            field.value === "COLLEGE"
+                              ? "border-primary bg-primary/5 ring-1 ring-primary"
+                              : "border-border hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="size-8 rounded-md bg-amber-50 dark:bg-amber-950 flex items-center justify-center text-amber-600">
+                              <GraduationCap className="size-4" />
+                            </div>
+                            {field.value === "COLLEGE" && (
+                              <Check className="size-4 text-primary" />
+                            )}
+                          </div>
+                          <div className="mt-3">
+                            <p className="font-semibold text-xs text-foreground">
+                              College / Academic Project
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                              Batches, student teams, faculty guides, milestone defense reviews, and rubric grading.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}

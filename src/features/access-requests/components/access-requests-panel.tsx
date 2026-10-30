@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import {
   Key,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   ShieldAlert,
   Loader2,
   Trash2,
+  ArrowLeft,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -128,7 +130,29 @@ export const AccessRequestsPanel = () => {
   };
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-4">
+      {/* Persistent Breadcrumb & Back Navigation */}
+      <div className="flex items-center justify-between pb-1">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 text-xs text-muted-foreground hover:text-foreground -ml-2"
+        >
+          <Link href={`/workspaces/${workspaceId}`}>
+            <ArrowLeft className="size-4" />
+            Back to Dashboard
+          </Link>
+        </Button>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+          <Link href={`/workspaces/${workspaceId}`} className="hover:underline">
+            Workspace
+          </Link>
+          <span>&gt;</span>
+          <span className="text-foreground font-semibold">Access Requests</span>
+        </div>
+      </div>
+
       <Card>
         <CardHeader className="p-6">
           <div className="flex items-center gap-3">

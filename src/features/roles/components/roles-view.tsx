@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { Plus, Shield, Search, History, Users } from "lucide-react";
+import { Plus, Shield, Search, History, Users, GraduationCap } from "lucide-react";
 import { useGetRoles } from "../api/use-get-roles";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { Role } from "../types";
 import { RoleMatrixEditor } from "./role-matrix-editor";
 import { CreateRoleDialog } from "./create-role-dialog";
@@ -21,6 +22,8 @@ interface RolesViewProps {
 
 export const RolesView: React.FC<RolesViewProps> = ({ workspaceId }) => {
   const { data: roles = [], isLoading } = useGetRoles({ workspaceId });
+  const { data: workspace } = useGetWorkspace({ workspaceId });
+  const isCollege = workspace?.type === "COLLEGE";
 
   const [activeTab, setActiveTab] = useState<"roles" | "audit">("roles");
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
@@ -31,24 +34,82 @@ export const RolesView: React.FC<RolesViewProps> = ({ workspaceId }) => {
   const [cloneRoleTarget, setCloneRoleTarget] = useState<Role | null>(null);
   const [deleteRoleTarget, setDeleteRoleTarget] = useState<Role | null>(null);
 
+  const displayRoles = useMemo(() => {
+    if (!isCollege) return roles;
+    return roles
+      .filter((r) => r.name.toLowerCase() !== "guest")
+      .map((r) => {
+        const lower = r.name.toLowerCase();
+        if (lower === "owner") {
+          return {
+            ...r,
+            name: "HOD / Department Coordinator",
+            description: "Full department oversight, batch creation, faculty allocation, and rubrics definition.",
+            color: "#e11d48",
+          };
+        }
+        if (lower === "admin") {
+          return {
+            ...r,
+            name: "College Academic Coordinator",
+            description: "Oversees batches, schedules review defenses, and coordinates faculty guides.",
+            color: "#7c3aed",
+          };
+        }
+        if (lower.includes("manager") || lower === "pm" || lower.includes("project")) {
+          return {
+            ...r,
+            name: "Faculty Project Guide",
+            description: "Group supervisor, task review gatekeeper, report & rubric evaluation.",
+            color: "#2563eb",
+          };
+        }
+        if (lower.includes("lead")) {
+          return {
+            ...r,
+            name: "Student Team Lead",
+            description: "Group task creator, milestone submitter, and group team manager.",
+            color: "#0891b2",
+          };
+        }
+        if (lower === "member") {
+          return {
+            ...r,
+            name: "Student Member",
+            description: "Task contributor, progress reporter, and deliverable collaborator.",
+            color: "#16a34a",
+          };
+        }
+        if (lower.includes("viewer")) {
+          return {
+            ...r,
+            name: "External Examiner",
+            description: "Viva defense & rubric evaluation only.",
+            color: "#d97706",
+          };
+        }
+        return r;
+      });
+  }, [roles, isCollege]);
+
   const filteredRoles = useMemo(() => {
     const q = searchRole.trim().toLowerCase();
-    if (!q) return roles;
-    return roles.filter(
+    if (!q) return displayRoles;
+    return displayRoles.filter(
       (r) =>
         r.name.toLowerCase().includes(q) ||
         (r.description && r.description.toLowerCase().includes(q))
     );
-  }, [roles, searchRole]);
+  }, [displayRoles, searchRole]);
 
   // Ensure selected role exists or default to first
   const selectedRole = useMemo(() => {
     if (selectedRoleId) {
-      const found = roles.find((r) => (r.id || r.$id) === selectedRoleId);
+      const found = displayRoles.find((r) => (r.id || r.$id) === selectedRoleId);
       if (found) return found;
     }
-    return roles[0] || null;
-  }, [roles, selectedRoleId]);
+    return displayRoles[0] || null;
+  }, [displayRoles, selectedRoleId]);
 
   return (
     <div className="w-full flex flex-col space-y-4">
@@ -56,11 +117,17 @@ export const RolesView: React.FC<RolesViewProps> = ({ workspaceId }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <Shield className="size-6 text-indigo-600" />
-            Roles & Permissions
+            {isCollege ? (
+              <GraduationCap className="size-6 text-purple-600" />
+            ) : (
+              <Shield className="size-6 text-indigo-600" />
+            )}
+            {isCollege ? "Department Roles & Academic Hierarchy" : "Roles & Permissions"}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Configure granular permissions, organization levels, and custom roles for your workspace.
+            {isCollege
+              ? "Academic permission structure: HOD -> Faculty Guides -> Student Team Leads -> Student Members -> External Examiners."
+              : "Configure granular permissions, organization levels, and custom roles for your workspace."}
           </p>
         </div>
 

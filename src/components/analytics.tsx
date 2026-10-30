@@ -60,3 +60,25 @@ export const Analytics = ({ data }: ProjectAnalyticsResponseType) => {
   );
 };
 
+export const AnalyticsSkeleton = () => {
+  return (
+    <ScrollArea className="border rounded-lg w-full whitespace-nowrap shrink-0">
+      <div className="w-full flex flex-row">
+        {[1, 2, 3, 4, 5].map((item, idx) => (
+          <div key={item} className="flex items-center flex-1">
+            <div className="p-6 w-full space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+                <div className="h-4 w-8 bg-muted animate-pulse rounded" />
+              </div>
+              <div className="h-8 w-16 bg-muted animate-pulse rounded" />
+            </div>
+            {idx < 4 && <DottedSeparator direction="vertical" />}
+          </div>
+        ))}
+      </div>
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
+  );
+};
+

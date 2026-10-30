@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
 import { DottedSeparator } from "@/components/dotted-separator";
@@ -146,7 +147,14 @@ export const CreateSprintForm = ({
                 Cancel
               </Button>
               <Button disabled={isPending} type="submit" size="lg">
-                Create Sprint
+                {isPending ? (
+                  <>
+                    <Loader2 className="size-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Sprint"
+                )}
               </Button>
             </div>
           </form>

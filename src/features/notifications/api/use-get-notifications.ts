@@ -24,7 +24,7 @@ export const useGetNotifications = ({ workspaceId, read }: UseGetNotificationsPr
       return data;
     },
     enabled: !!workspaceId,
-    refetchInterval: 10000, // Refresh every 10s for new notifications
+    refetchInterval: 30000, // Refresh every 30s for new notifications
   });
 
   return query;

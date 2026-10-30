@@ -12,6 +12,8 @@ import teams from "@/features/teams/server/route";
 import accessRequests from "@/features/access-requests/server/route";
 import inviteLinks from "@/features/invite-links/server/route";
 import notifications from "@/features/notifications/server/route";
+import chat from "@/features/chat/server/route";
+import college from "@/features/college/server/route";
 
 const app = new Hono().basePath("/api");
 
@@ -27,7 +29,9 @@ const routes = app
   .route("/teams", teams)
   .route("/access-requests", accessRequests)
   .route("/invite-links", inviteLinks)
-  .route("/notifications", notifications);
+  .route("/notifications", notifications)
+  .route("/chat", chat)
+  .route("/college", college);
 
 export const GET = handle(app);
 export const POST = handle(app);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useMemo, useCallback, memo } from "react";
 import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import {
   format,
@@ -66,32 +66,66 @@ const CustomToolbar = ({ date, onNavigate }: CustomToolbarProps) => {
   )
 }
 
-export const DataCalendar = ({
+const calendarFormats = {
+  weekdayFormat: (date: Date, culture?: string, loc?: typeof localizer) =>
+    loc?.format(date, "EEE", culture) ?? "",
+};
+
+export const DataCalendar = memo(({
   data,
 }: DataCalendarProps) => {
   const [value, setValue] = useState(
     data.length > 0 ? new Date(data[0].dueDate) : new Date()
   );
 
-  const events = data.map((task) => ({
-    start: new Date(task.dueDate),
-    end: new Date(task.dueDate),
-    title: task.name,
-    project: task.project,
-    assignee: task.assignee,
-    status: task.status,
-    id: task.$id,
-  }));
+  const events = useMemo(
+    () =>
+      data.map((task) => ({
+        start: new Date(task.dueDate),
+        end: new Date(task.dueDate),
+        title: task.name,
+        project: task.project,
+        assignee: task.assignee,
+        status: task.status,
+        id: task.$id,
+      })),
+    [data]
+  );
 
-  const handleNavigate = (action: "PREV" | "NEXT" | "TODAY") => {
+  const maxDate = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return d;
+  }, []);
+
+  const handleNavigate = useCallback((action: "PREV" | "NEXT" | "TODAY") => {
     if (action === "PREV") {
-      setValue(subMonths(value, 1));
+      setValue((v) => subMonths(v, 1));
     } else if (action === "NEXT") {
-      setValue(addMonths(value, 1))
+      setValue((v) => addMonths(v, 1));
     } else if (action === "TODAY") {
       setValue(new Date());
     }
-  };
+  }, []);
+
+  const components = useMemo(
+    () => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      eventWrapper: ({ event }: any) => (
+        <EventCard
+          id={event.id}
+          title={event.title}
+          assignee={event.assignee}
+          project={event.project}
+          status={event.status}
+        />
+      ),
+      toolbar: () => (
+        <CustomToolbar date={value} onNavigate={handleNavigate} />
+      ),
+    }),
+    [value, handleNavigate]
+  );
 
   return (
     <Calendar
@@ -103,24 +137,11 @@ export const DataCalendar = ({
       toolbar
       showAllEvents
       className="h-full"
-      max={new Date(new Date().setFullYear(new Date().getFullYear() + 1))}
-      formats={{
-        weekdayFormat: (date, culture, localizer) => localizer?.format(date, "EEE", culture) ?? ""
-      }}
-      components={{
-        eventWrapper: ({ event }) => (
-          <EventCard
-            id={event.id}
-            title={event.title}
-            assignee={event.assignee}
-            project={event.project}
-            status={event.status}
-          />
-        ),
-        toolbar: () => (
-          <CustomToolbar date={value} onNavigate={handleNavigate} />
-        )
-      }}
+      max={maxDate}
+      formats={calendarFormats}
+      components={components}
     />
   );
-};
+});
+
+DataCalendar.displayName = "DataCalendar";

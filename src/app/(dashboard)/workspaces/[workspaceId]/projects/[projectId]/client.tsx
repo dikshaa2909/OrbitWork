@@ -10,7 +10,7 @@ import { TaskViewSwitcher } from "@/features/tasks/components/task-view-switcher
 import { useGetProjectAnalytics } from "@/features/projects/api/use-get-project-analytics";
 
 import { Button } from "@/components/ui/button";
-import { Analytics } from "@/components/analytics";
+import { Analytics, AnalyticsSkeleton } from "@/components/analytics";
 import { PageError } from "@/components/page-error";
 import { PageLoader } from "@/components/page-loader";
 
@@ -22,9 +22,7 @@ export const ProjectIdClient = () => {
   const { data: analytics, isLoading: isLoadingAnalytics } = useGetProjectAnalytics({ projectId });
   const { canEditProject } = usePermissions(project?.workspaceId);
 
-  const isLoading = isLoadingProject || isLoadingAnalytics;
-
-  if (isLoading) {
+  if (isLoadingProject) {
     return <PageLoader />
   }
 
@@ -33,7 +31,7 @@ export const ProjectIdClient = () => {
   }
 
   return (
-    <div className="flex flex-col gap-y-4">
+    <div className="flex flex-col gap-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div  className="flex items-center gap-x-2">
           <ProjectAvatar
@@ -54,9 +52,11 @@ export const ProjectIdClient = () => {
           </div>
         )}
       </div>
-      {analytics ? (
+      {isLoadingAnalytics || !analytics ? (
+        <AnalyticsSkeleton />
+      ) : (
         <Analytics data={analytics} />
-      ) : null}
+      )}
       <TaskViewSwitcher hideProjectFilter />
     </div>
   )

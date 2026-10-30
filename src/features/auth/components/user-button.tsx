@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader, LogOut } from "lucide-react";
+import { Loader, LogOut, Sun, Moon, Laptop } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -19,6 +20,7 @@ export const UserButton = () => {
   const { mutate: logout } = useLogout();
   const { data: user, isLoading } = useCurrent();
   const { role } = usePermissions();
+  const { setTheme, theme } = useTheme();
 
   if (isLoading) {
     return (
@@ -67,6 +69,36 @@ export const UserButton = () => {
           </div>
         </div>
         <DottedSeparator className="mb-1" />
+        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+          <span>Theme</span>
+          <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              className={`p-1 rounded ${theme === "light" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              title="Light mode"
+            >
+              <Sun className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              className={`p-1 rounded ${theme === "dark" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              title="Dark mode"
+            >
+              <Moon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("system")}
+              className={`p-1 rounded ${theme === "system" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              title="System preference"
+            >
+              <Laptop className="size-3.5" />
+            </button>
+          </div>
+        </div>
+        <DottedSeparator className="my-1" />
         <DropdownMenuItem
           onClick={() => logout()}
           className="h-10 flex items-center justify-center text-amber-700 font-medium cursor-pointer"
