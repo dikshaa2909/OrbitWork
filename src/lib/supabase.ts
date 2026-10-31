@@ -379,12 +379,26 @@ export const createDatabasesClient = (client: SupabaseClient) => {
         updated_at: new Date().toISOString(),
       });
 
-      const { data, error } = await client
+      let { data, error } = await client
         .from(table)
         .update(updatePayload)
         .eq("id", id)
         .select()
         .single();
+
+      // If updated_at column does not exist on this table, retry without updated_at
+      if (error && error.message?.includes("updated_at")) {
+        const fallbackPayload = cleanPayload(docData);
+        delete fallbackPayload.updated_at;
+        const retry = await client
+          .from(table)
+          .update(fallbackPayload)
+          .eq("id", id)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error || !data) {
         console.error(`Error updating in ${table}:`, error);

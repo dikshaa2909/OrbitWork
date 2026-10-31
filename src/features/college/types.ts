@@ -132,6 +132,11 @@ export interface GuideTaskVerificationItem {
   name: string;
   status: string;
   verification_status: "NOT_SUBMITTED" | "PENDING_GUIDE_REVIEW" | "CHANGES_REQUESTED" | "APPROVED";
+  review_status?: "TODO" | "IN_PROGRESS" | "READY_FOR_REVIEW" | "CHANGES_REQUESTED" | "APPROVED";
+  submission_notes?: string | null;
+  submission_file_url?: string | null;
+  submitted_for_review_at?: string | null;
+  reviewer_feedback?: string | null;
   guide_feedback?: string | null;
   verified_at?: string | null;
   verified_by?: string | null;
@@ -140,6 +145,111 @@ export interface GuideTaskVerificationItem {
   team_code: string;
   team_title: string;
   assignee_name?: string;
+}
+
+export interface HodGroupMilestoneCell {
+  milestone_id: string;
+  milestone_title: string;
+  order_index: number;
+  status: "NOT_SUBMITTED" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED" | "OVERDUE";
+  score: number | null;
+  max_marks: number;
+  is_overdue: boolean;
+  submitted_at: string | null;
+  file_url: string | null;
+  version: number | null;
+  remarks: string | null;
+}
+
+export interface HodGroupMilestoneRow {
+  team_id: string;
+  team_code: string;
+  project_title: string;
+  guide_name: string;
+  lead_name: string;
+  member_count: number;
+  milestones: HodGroupMilestoneCell[];
+  completed_count: number;
+}
+
+export interface HodMilestoneOverviewStats {
+  total_groups: number;
+  total_milestones: number;
+  completion_rate_percentage: number;
+  stalled_groups_count: number;
+  overdue_submissions_count: number;
+  pending_faculty_review_count: number;
+}
+
+export interface HodMilestoneOverviewResponse {
+  batch: Batch;
+  milestones: Milestone[];
+  groups: HodGroupMilestoneRow[];
+  stats: HodMilestoneOverviewStats;
+}
+
+export interface GuideSubmissionItem {
+  submission_id: string;
+  milestone_id: string;
+  milestone_title: string;
+  milestone_description?: string | null;
+  due_date?: string | null;
+  max_marks: number;
+  team_id: string;
+  team_code: string;
+  team_title: string;
+  status: "DRAFT" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED";
+  notes?: string | null;
+  file_url?: string | null;
+  version: number;
+  submitted_at: string;
+  submitted_by_name: string;
+  rubric_criteria: Array<{
+    id: string;
+    title: string;
+    description?: string | null;
+    max_score: number;
+  }>;
+  evaluations: Array<{
+    rubric_criteria_id: string;
+    score: number;
+    feedback?: string | null;
+  }>;
+  total_score: number | null;
+  remarks?: string | null;
+}
+
+export interface TeamMilestoneItem {
+  id: string;
+  batch_id: string;
+  title: string;
+  description?: string | null;
+  due_date?: string | null;
+  max_marks: number;
+  order_index: number;
+  status: "NOT_SUBMITTED" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED" | "OVERDUE";
+  submission?: {
+    id: string;
+    file_url?: string | null;
+    notes?: string | null;
+    status: "DRAFT" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED";
+    submitted_at: string;
+    version: number;
+  } | null;
+  grade?: {
+    score: number;
+    total_score: number;
+    remarks?: string | null;
+    graded_at: string;
+    evaluator_name?: string;
+  } | null;
+  is_overdue: boolean;
+  countdown_label: string;
+  rubric_criteria: Array<{
+    id: string;
+    title: string;
+    max_score: number;
+  }>;
 }
 
 // Zod Schemas
@@ -202,10 +312,18 @@ export const gradeSubmissionSchema = z.object({
 });
 
 export const verifyTaskSchema = z.object({
-  decision: z.enum(["APPROVED", "CHANGES_REQUESTED"]),
+  decision: z.enum(["APPROVED", "CHANGES_REQUESTED", "APPROVE", "REQUEST_CHANGES"]),
   feedback: z.string().optional(),
 });
 
 export const submitTaskReviewSchema = z.object({
   notes: z.string().optional(),
+  submissionNotes: z.string().optional(),
+  fileUrl: z.string().optional(),
+  submissionFileUrl: z.string().optional(),
+});
+
+export const submitTaskWorkSchema = z.object({
+  submissionNotes: z.string().trim().min(1, "Submission notes are required"),
+  submissionFileUrl: z.string().trim().optional(),
 });

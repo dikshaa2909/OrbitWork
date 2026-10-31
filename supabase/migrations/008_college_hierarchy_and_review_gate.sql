@@ -13,6 +13,9 @@ ADD COLUMN IF NOT EXISTS verified_by TEXT REFERENCES public.members(id) ON DELET
 CREATE INDEX IF NOT EXISTS idx_tasks_verification_status ON public.tasks(verification_status);
 CREATE INDEX IF NOT EXISTS idx_tasks_verified_by ON public.tasks(verified_by);
 
+-- 1b. Allow team creation before student leads are assigned
+ALTER TABLE public.academic_teams ALTER COLUMN lead_member_id DROP NOT NULL;
+
 -- 2. Progress View / RPC for Batch Groups Monitoring
 CREATE OR REPLACE FUNCTION public.get_batch_groups_progress(p_batch_id UUID)
 RETURNS TABLE (

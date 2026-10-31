@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Databases, ID, Query } from "@/lib/supabase";
+import { Databases, ID, Query, getAdminDatabases } from "@/lib/supabase";
 import {
   DATABASE_ID,
   MEMBERS_ID,
@@ -10,6 +10,7 @@ import {
   ROLE_PERMISSIONS_ID,
   ROLES_ID,
   WORKSPACES_ID,
+  ACADEMIC_TEAM_MEMBERS_ID,
 } from "@/config";
 import { Member } from "@/features/members/types";
 import { MemberPermissionProfile, RoleData, PermissionGrantData } from "./engine";
@@ -23,9 +24,11 @@ export async function getMemberPermissionProfile(
   workspaceId: string,
   userId: string
 ): Promise<MemberPermissionProfile | null> {
-  // 1. Fetch member and workspace in parallel
+  const adminDb = getAdminDatabases("permissions:profile");
+
+  // 1. Fetch member and workspace in parallel (using admin client to prevent RLS denial during permission checks)
   const [members, ws] = await Promise.all([
-    databases.listDocuments<Member & { roleId?: string; reportsToId?: string | null }>(
+    adminDb.listDocuments<Member & { roleId?: string; reportsToId?: string | null }>(
       DATABASE_ID,
       MEMBERS_ID,
       [
@@ -33,8 +36,16 @@ export async function getMemberPermissionProfile(
         Query.equal("userId", userId),
         Query.limit(1),
       ]
-    ),
-    databases.getDocument<{ userId?: string }>(
+    ).catch(() => databases.listDocuments<Member & { roleId?: string; reportsToId?: string | null }>(
+      DATABASE_ID,
+      MEMBERS_ID,
+      [
+        Query.equal("workspaceId", workspaceId),
+        Query.equal("userId", userId),
+        Query.limit(1),
+      ]
+    )),
+    adminDb.getDocument<{ userId?: string }>(
       DATABASE_ID,
       WORKSPACES_ID,
       workspaceId
@@ -54,19 +65,36 @@ export async function getMemberPermissionProfile(
   if (member.roleId) {
     try {
       const [roleDoc, permDocs] = await Promise.all([
-        databases.getDocument<RoleData & { $id: string }>(
+        adminDb.getDocument<RoleData & { $id: string }>(
           DATABASE_ID,
           ROLES_ID,
           member.roleId
         ),
-        databases.listDocuments<{ permissionKey: string; allowed: boolean }>(
+        adminDb.listDocuments<{ permissionKey: string; allowed: boolean }>(
           DATABASE_ID,
           ROLE_PERMISSIONS_ID,
           [Query.equal("roleId", member.roleId), Query.equal("allowed", true)]
         ),
       ]);
 
-      const permissions = permDocs.documents.map((p) => p.permissionKey);
+      const dbPermissions = permDocs.documents.map((p) => p.permissionKey);
+
+      // Merge system template permissions so newly added system keys (e.g. college:teams.create)
+      // are always available to Project Managers / Faculty Guides / Admins
+      const normalizedName = (roleDoc.name || "").toUpperCase().replace(/\s+/g, "_");
+      const systemTemplate =
+        SYSTEM_ROLE_TEMPLATES[normalizedName as keyof typeof SYSTEM_ROLE_TEMPLATES] ||
+        (roleDoc.level <= HIERARCHY_LEVELS.OWNER
+          ? SYSTEM_ROLE_TEMPLATES.OWNER
+          : roleDoc.level <= HIERARCHY_LEVELS.ADMIN
+          ? SYSTEM_ROLE_TEMPLATES.ADMIN
+          : roleDoc.level <= HIERARCHY_LEVELS.PROJECT_MANAGER
+          ? SYSTEM_ROLE_TEMPLATES.PROJECT_MANAGER
+          : null);
+
+      const mergedPermissions = Array.from(
+        new Set([...dbPermissions, ...(systemTemplate?.permissions || [])])
+      );
 
       roleData = {
         id: roleDoc.$id || roleDoc.id,
@@ -74,7 +102,7 @@ export async function getMemberPermissionProfile(
         level: roleDoc.level ?? HIERARCHY_LEVELS.MEMBER,
         isSystem: roleDoc.isSystem ?? false,
         color: roleDoc.color || "#6366f1",
-        permissions,
+        permissions: mergedPermissions,
       };
     } catch {
       // Fallback to text role if role doc lookup fails
@@ -101,15 +129,40 @@ export async function getMemberPermissionProfile(
     };
   }
 
+  // 2b. Academic Team Lead elevation: If member is assigned as LEAD in academic_team_members,
+  // grant TEAM_LEAD permissions so they can create/assign group tasks
+  try {
+    const leadDocs = await adminDb.listDocuments<{ team_id: string; role: string }>(
+      DATABASE_ID,
+      ACADEMIC_TEAM_MEMBERS_ID,
+      [Query.equal("member_id", memberId), Query.equal("role", "LEAD"), Query.limit(1)]
+    );
+    if (leadDocs.total > 0 && roleData.level > HIERARCHY_LEVELS.TEAM_LEAD) {
+      const leadTemplate = SYSTEM_ROLE_TEMPLATES.TEAM_LEAD;
+      const existingPerms = Array.isArray(roleData.permissions)
+        ? roleData.permissions
+        : Object.keys(roleData.permissions).filter((k) => (roleData.permissions as Record<string, boolean>)[k]);
+      roleData = {
+        name: "Team Lead",
+        level: HIERARCHY_LEVELS.TEAM_LEAD,
+        isSystem: false,
+        color: leadTemplate.color,
+        permissions: Array.from(new Set([...existingPerms, ...leadTemplate.permissions])),
+      };
+    }
+  } catch {
+    // Non-college workspace or table not queried
+  }
+
   // 3 & 4. Fetch project overrides and temporary grants in parallel
   const [projectMemberDocs, grantDocs] = await Promise.all([
-    databases.listDocuments<{
+    adminDb.listDocuments<{
       projectId: string;
       roleId?: string | null;
     }>(DATABASE_ID, PROJECT_MEMBERS_ID, [
       Query.equal("memberId", memberId),
     ]).catch(() => ({ total: 0, documents: [] as Array<{ projectId: string; roleId?: string | null }> })),
-    databases.listDocuments<PermissionGrantData & { id?: string; $id?: string }>(
+    adminDb.listDocuments<PermissionGrantData & { id?: string; $id?: string }>(
       DATABASE_ID,
       PERMISSION_GRANTS_ID,
       [

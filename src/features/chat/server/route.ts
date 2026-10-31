@@ -11,6 +11,10 @@ import {
   MESSAGE_REACTIONS_ID,
   TASKS_ID,
   MEMBERS_ID,
+  ROLES_ID,
+  ACADEMIC_TEAMS_ID,
+  ACADEMIC_TEAM_MEMBERS_ID,
+  TEAM_GUIDES_ID,
 } from "@/config";
 import { ID, Query, getAdminDatabases } from "@/lib/supabase";
 import { can } from "@/lib/permissions/engine";
@@ -92,7 +96,7 @@ const app = new Hono()
         // Filter: user sees:
         // 1. Any channel where they are an explicit member
         // 2. Any WORKSPACE public channel
-        // 3. If they have chat:channels.view_all, PROJECT/TEAM channels (BUT NEVER DMs)
+        // 3. If they have chat:channels.view_all, PROJECT/TEAM channels (BUT NEVER DMs, and NEVER academic teams where they are not a member)
         const visibleChannels: Channel[] = [];
 
         for (const ch of allChannels.documents) {
@@ -103,6 +107,12 @@ const app = new Hono()
             if (isMember) {
               visibleChannels.push(ch);
             }
+          } else if (ch.team_id) {
+            // Academic project team channel: Strictly restricted to group members and assigned faculty guide!
+            // Even if caller has chat:channels.view_all (like HOD / Admin), they must NOT see private student group channels unless they are an assigned member!
+            if (isMember) {
+              visibleChannels.push(ch);
+            }
           } else if (isMember || ch.type === "WORKSPACE") {
             visibleChannels.push(ch);
           } else if (
@@ -110,6 +120,33 @@ const app = new Hono()
             (ch.type === "PROJECT" || ch.type === "TEAM")
           ) {
             visibleChannels.push(ch);
+          }
+        }
+
+        // Auto-provision default Department Announcements channel if none exists
+        const hasWorkspaceChannel = allChannels.documents.some((ch) => ch.type === "WORKSPACE");
+        if (!hasWorkspaceChannel) {
+          try {
+            const wsChannelId = ID.unique();
+            const createdWsChannel = await adminDatabases.createDocument<Channel>(
+              DATABASE_ID,
+              CHANNELS_ID,
+              wsChannelId,
+              {
+                id: wsChannelId,
+                workspace_id: workspaceId,
+                type: "WORKSPACE",
+                name: "Department Announcements",
+                description: "Department-wide notices and faculty announcements",
+                created_by: user.$id,
+                is_archived: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+            );
+            visibleChannels.unshift(createdWsChannel);
+          } catch {
+            // Channel auto-create fallback
           }
         }
 
@@ -371,6 +408,10 @@ const app = new Hono()
         return c.json({ error: "Forbidden: Not a participant of this direct message" }, 403);
       }
 
+      if (channel.team_id && !isMember) {
+        return c.json({ error: "Forbidden: Academic team channels are restricted to group students and assigned faculty guide" }, 403);
+      }
+
       if (
         !isMember &&
         channel.type !== "WORKSPACE" &&
@@ -420,30 +461,153 @@ const app = new Hono()
       const authorIds = Array.from(
         new Set(messagesDoc.documents.map((m) => m.author_id))
       );
-      const authors = await adminDatabases.listDocuments<{
-        userId: string;
-        name?: string;
-        email?: string;
-      }>(DATABASE_ID, MEMBERS_ID, [
-        Query.equal("workspaceId", channel.workspace_id),
-        Query.contains("userId", authorIds),
+      const [authors, profilesDoc] = await Promise.all([
+        adminDatabases.listDocuments<{
+          id: string;
+          userId: string;
+          role?: string;
+          roleId?: string;
+        }>(DATABASE_ID, MEMBERS_ID, [
+          Query.equal("workspaceId", channel.workspace_id),
+          Query.contains("userId", authorIds),
+        ]),
+        adminDatabases.listDocuments<{
+          id: string;
+          name: string;
+          email: string;
+        }>(DATABASE_ID, "profiles", [
+          Query.contains("id", authorIds),
+        ]).catch(() => ({ documents: [] })),
       ]);
 
-      const authorMap = new Map<string, { name: string; email: string }>();
+      const profileMap = new Map<string, { name: string; email: string }>();
+      for (const p of profilesDoc.documents) {
+        profileMap.set(p.id, { name: p.name, email: p.email });
+      }
+
+      const roleIds = authors.documents.map((a) => a.roleId).filter(Boolean) as string[];
+      let rolesDoc: { documents: Array<{ id: string; name: string }> } = { documents: [] };
+      if (roleIds.length > 0) {
+        rolesDoc = await adminDatabases.listDocuments<{ id: string; name: string }>(
+          DATABASE_ID,
+          ROLES_ID,
+          [Query.contains("id", roleIds)]
+        ).catch(() => ({ documents: [] }));
+      }
+      const roleNameMap = new Map<string, string>();
+      for (const r of rolesDoc.documents) roleNameMap.set(r.id, r.name);
+
+      const authorMap = new Map<string, { id: string; name: string; email: string; role?: string; roleName?: string }>();
       for (const a of authors.documents) {
+        const prof = profileMap.get(a.userId);
+        const resolvedRoleName = (a.roleId ? roleNameMap.get(a.roleId) : null) || a.role;
         authorMap.set(a.userId, {
-          name: a.name || a.email || "Teammate",
-          email: a.email || "",
+          id: a.id,
+          name: prof?.name || a.userId,
+          email: prof?.email || "",
+          role: a.role,
+          roleName: resolvedRoleName,
         });
       }
 
+      // Author academic role resolution for college/team context
+      const guideMemberIds = new Set<string>();
+      const leadMemberIds = new Set<string>();
+      const studentMemberIds = new Set<string>();
+
+      if (channel.team_id) {
+        try {
+          const [teamDoc, guidesDoc, teamMembersDoc] = await Promise.all([
+            adminDatabases.getDocument<{ lead_member_id?: string }>(
+              DATABASE_ID,
+              ACADEMIC_TEAMS_ID,
+              channel.team_id
+            ).catch(() => null),
+            adminDatabases.listDocuments<{ guide_member_id: string }>(
+              DATABASE_ID,
+              TEAM_GUIDES_ID,
+              [Query.equal("team_id", channel.team_id)]
+            ).catch(() => ({ documents: [] })),
+            adminDatabases.listDocuments<{ member_id: string; role: string }>(
+              DATABASE_ID,
+              ACADEMIC_TEAM_MEMBERS_ID,
+              [Query.equal("team_id", channel.team_id)]
+            ).catch(() => ({ documents: [] })),
+          ]);
+
+          if (teamDoc?.lead_member_id) {
+            leadMemberIds.add(teamDoc.lead_member_id);
+          }
+          for (const g of guidesDoc.documents) {
+            guideMemberIds.add(g.guide_member_id);
+          }
+          for (const m of teamMembersDoc.documents) {
+            if (m.role === "LEAD") {
+              leadMemberIds.add(m.member_id);
+            } else {
+              studentMemberIds.add(m.member_id);
+            }
+          }
+        } catch {
+          // ignore lookup fallback
+        }
+      }
+
       const enrichedMessages: Message[] = messagesDoc.documents
-        .map((m) => ({
-          ...m,
-          author_name: authorMap.get(m.author_id)?.name || "Teammate",
-          author_email: authorMap.get(m.author_id)?.email || "",
-          reactions: reactionsByMsg.get(m.id) || [],
-        }))
+        .map((m) => {
+          const authorData = authorMap.get(m.author_id);
+          const authorMemberId = authorData?.id || m.author_id;
+
+          let authorRole = "";
+          let authorRoleLabel = "";
+
+          if (channel.team_id) {
+            if (guideMemberIds.has(authorMemberId) || guideMemberIds.has(m.author_id)) {
+              authorRole = "FACULTY_GUIDE";
+              authorRoleLabel = "Faculty Guide";
+            } else if (leadMemberIds.has(authorMemberId) || leadMemberIds.has(m.author_id)) {
+              authorRole = "TEAM_LEAD";
+              authorRoleLabel = "Team Lead";
+            } else if (studentMemberIds.has(authorMemberId) || studentMemberIds.has(m.author_id)) {
+              authorRole = "STUDENT";
+              authorRoleLabel = "Student";
+            }
+          } else {
+            // General workspace channels
+            if (
+              authorData?.roleName?.toLowerCase().includes("faculty") ||
+              authorData?.roleName?.toLowerCase().includes("guide") ||
+              authorData?.role === "PROJECT_MANAGER"
+            ) {
+              authorRole = "FACULTY_GUIDE";
+              authorRoleLabel = "Faculty Guide";
+            } else if (
+              authorData?.roleName?.toLowerCase().includes("admin") ||
+              authorData?.roleName?.toLowerCase().includes("owner") ||
+              authorData?.roleName?.toLowerCase().includes("hod") ||
+              authorData?.role === "ADMIN" ||
+              authorData?.role === "OWNER"
+            ) {
+              authorRole = "HOD";
+              authorRoleLabel = "HOD";
+            } else if (authorData?.roleName?.toLowerCase().includes("lead")) {
+              authorRole = "TEAM_LEAD";
+              authorRoleLabel = "Team Lead";
+            } else {
+              authorRole = "STUDENT";
+              authorRoleLabel = "Student";
+            }
+          }
+
+          return {
+            ...m,
+            author_name: authorData?.name || "Teammate",
+            author_email: authorData?.email || "",
+            author_role: authorRole || undefined,
+            author_role_label: authorRoleLabel || undefined,
+            reactions: reactionsByMsg.get(m.id) || [],
+          };
+        })
         .reverse(); // ascending order for display
 
       return c.json({ data: enrichedMessages });
@@ -492,6 +656,10 @@ const app = new Hono()
 
       if (channel.type === "DM" && !isMember) {
         return c.json({ error: "Forbidden: Not in this DM" }, 403);
+      }
+
+      if (channel.team_id && !isMember) {
+        return c.json({ error: "Forbidden: Academic team channels are restricted to group students and assigned faculty guide" }, 403);
       }
 
       // If workspace channel and not joined, auto-join

@@ -384,8 +384,35 @@ const app = new Hono()
         return c.json({ error: "This invite link has reached its maximum uses or has expired" }, 410);
       }
 
-      // Create member record
-      const assignedRole: MemberRole = MemberRole.MEMBER;
+      // Resolve role mapping based on target_role or roleId
+      let assignedRole: MemberRole = MemberRole.MEMBER;
+      let assignedRoleId: string | null = link.roleId || null;
+
+      if (link.target_role === "FACULTY_GUIDE") {
+        assignedRole = MemberRole.PROJECT_MANAGER;
+        if (!assignedRoleId) {
+          try {
+            const roleDocs = await adminDatabases.listDocuments<{ id: string; name: string }>(
+              DATABASE_ID,
+              ROLES_ID,
+              [Query.equal("workspaceId", workspaceId)]
+            );
+            const facultyRole = roleDocs.documents.find(
+              (r) =>
+                r.name.toLowerCase().includes("faculty") ||
+                r.name.toLowerCase().includes("guide") ||
+                r.name.toLowerCase().includes("project manager")
+            );
+            if (facultyRole) {
+              assignedRoleId = facultyRole.id;
+            }
+          } catch {
+            // Ignore role lookup fallback
+          }
+        }
+      } else if (link.target_role === "ADMIN") {
+        assignedRole = MemberRole.ADMIN;
+      }
 
       const member = await userDatabases.createDocument<Member>(
         DATABASE_ID, MEMBERS_ID, ID.unique(),
@@ -393,7 +420,7 @@ const app = new Hono()
           workspaceId,
           userId: user.$id,
           role: assignedRole,
-          roleId: link.roleId || null,
+          roleId: assignedRoleId,
         }
       );
 
@@ -447,7 +474,7 @@ const app = new Hono()
           workspaceId,
           memberId,
           role: assignedRole,
-          roleId: link.roleId || null,
+          roleId: assignedRoleId,
           targetRole: link.target_role || null,
           academicTeamId: link.academic_team_id || null,
         },

@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { Info, Key, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
+import { useCollegePersona } from "@/features/college/hooks/use-college-persona";
 import { RequestAccessDialog } from "@/features/access-requests/components/request-access-dialog";
 
 interface AwaitingPermissionsBannerProps {
@@ -13,10 +15,17 @@ interface AwaitingPermissionsBannerProps {
 export const AwaitingPermissionsBanner: React.FC<AwaitingPermissionsBannerProps> = ({
   workspaceId,
 }) => {
+  const { data: workspace } = useGetWorkspace({ workspaceId });
+  const { isHod, isGuide, isStudent, isTeamLead } = useCollegePersona(workspaceId);
   const { isOwner, isAdmin, isPM, canCreateTask, canCreateProject, isLoading, role } =
     usePermissions(workspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+
+  // In College workspaces, structured academic roles govern actions - do NOT show corporate view-only banner
+  if (workspace?.type === "COLLEGE" || isHod || isGuide || isStudent || isTeamLead) {
+    return null;
+  }
 
   // If loading or dismissed or user already has significant powers (owner, admin, PM, can create tasks)
   if (isLoading || dismissed) return null;
@@ -58,7 +67,6 @@ export const AwaitingPermissionsBanner: React.FC<AwaitingPermissionsBannerProps>
             type="button"
             onClick={() => setDismissed(true)}
             className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-200 p-1"
-            title="Dismiss notice"
           >
             <X className="size-3.5" />
           </button>

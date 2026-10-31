@@ -31,9 +31,18 @@ export const useCreateAcademicTeam = () => {
       return await response.json();
     },
     onSuccess: (_, variables) => {
-      toast.success("Team registered successfully");
+      toast.success("Project group created successfully");
       queryClient.invalidateQueries({
         queryKey: ["college-teams", variables.param.batchId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["college-guide-dashboard"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["college-guide-groups"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["batch-overview"],
       });
     },
     onError: (err) => {

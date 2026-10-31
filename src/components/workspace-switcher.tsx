@@ -3,14 +3,15 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { RiAddCircleFill } from "react-icons/ri";
 import { Plus, UserPlus } from "lucide-react";
 
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { useGetWorkspaces } from "@/features/workspaces/api/use-get-workspaces";
 import { WorkspaceAvatar } from "@/features/workspaces/components/workspace-avatar";
 import { useCreateWorkspaceModal } from "@/features/workspaces/hooks/use-create-workspace-modal";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useCollegePersona } from "@/features/college/hooks/use-college-persona";
 import { Badge } from "@/components/ui/badge";
 
 import {
@@ -27,8 +28,11 @@ export const WorkspaceSwitcher = () => {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: workspaces } = useGetWorkspaces();
+  const { data: currentWorkspace } = useGetWorkspace({ workspaceId });
   const { open } = useCreateWorkspaceModal();
   const { role } = usePermissions(workspaceId);
+  const isCollege = currentWorkspace?.type === "COLLEGE";
+  const { badgeLabel: collegeBadge } = useCollegePersona(isCollege ? workspaceId : undefined);
 
   useEffect(() => {
     if (workspaceId) {
@@ -68,20 +72,24 @@ export const WorkspaceSwitcher = () => {
           <p className="text-xs uppercase text-neutral-500 font-semibold tracking-wider">
             Workspaces
           </p>
-          {role && (
+          {isCollege ? (
+            collegeBadge && (
+              <Badge
+                variant="secondary"
+                className="text-[9px] uppercase font-bold tracking-tight py-0 px-1.5 h-4 bg-primary/10 text-primary border border-primary/20"
+              >
+                {collegeBadge}
+              </Badge>
+            )
+          ) : role ? (
             <Badge
               variant="secondary"
               className="text-[9px] uppercase font-bold tracking-tight py-0 px-1.5 h-4 bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
             >
               {role}
             </Badge>
-          )}
+          ) : null}
         </div>
-        <RiAddCircleFill
-          onClick={open}
-          className="size-5 text-neutral-500 cursor-pointer hover:opacity-75 transition"
-          title="Create Workspace"
-        />
       </div>
       <Select onValueChange={onSelect} value={workspaceId}>
         <SelectTrigger className="w-full bg-neutral-200 dark:bg-neutral-800 text-foreground font-medium p-1 border border-border">

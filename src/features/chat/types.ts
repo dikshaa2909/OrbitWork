@@ -59,6 +59,8 @@ export interface Message {
   // Joined fields
   author_name?: string;
   author_email?: string;
+  author_role?: string;
+  author_role_label?: string;
   reactions?: MessageReaction[];
   reply_count?: number;
 }

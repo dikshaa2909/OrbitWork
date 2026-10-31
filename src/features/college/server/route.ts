@@ -19,6 +19,7 @@ import {
   CHANNELS_ID,
   CHANNEL_MEMBERS_ID,
   INVITE_LINKS_ID,
+  ROLES_ID,
 } from "@/config";
 import { ID, Query, getAdminDatabases, getSupabaseAdminClient } from "@/lib/supabase";
 import { can } from "@/lib/permissions/engine";
@@ -33,6 +34,7 @@ import {
   gradeSubmissionSchema,
   verifyTaskSchema,
   submitTaskReviewSchema,
+  submitTaskWorkSchema,
   Batch,
   AcademicTeam,
   AcademicTeamMember,
@@ -44,6 +46,8 @@ import {
   Evaluation,
   BatchGroupProgress,
   GuideTaskVerificationItem,
+  GuideSubmissionItem,
+  TeamMilestoneItem,
 } from "../types";
 
 const deny = (c: Context, key: string) =>
@@ -57,6 +61,167 @@ const deny = (c: Context, key: string) =>
   );
 
 const app = new Hono()
+  // ===========================================================================
+  // 0. True Role & Persona Resolution (Single Source of Truth)
+  // ===========================================================================
+  .get(
+    "/workspaces/:workspaceId/persona",
+    sessionMiddleware,
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { workspaceId } = c.req.param();
+
+      const profile = await getMemberPermissionProfile(databases, workspaceId, user.$id);
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const adminDatabases = getAdminDatabases("college:resolve-persona");
+      const memberId = profile.id;
+
+      // 1. Determine HOD status (Owner or Admin level <= 10)
+      const isHod =
+        profile.isWorkspaceOwner ||
+        profile.role.level <= 10 ||
+        profile.role.name?.toLowerCase().includes("owner") ||
+        profile.role.name?.toLowerCase().includes("admin") ||
+        profile.role.name?.toLowerCase().includes("hod") ||
+        profile.role.name?.toLowerCase().includes("coordinator");
+
+      // 2. Check if user is an assigned guide or holds faculty role
+      const guideDocs = await adminDatabases.listDocuments<TeamGuide>(
+        DATABASE_ID,
+        TEAM_GUIDES_ID,
+        [Query.contains("guide_member_id", [memberId, user.$id]), Query.limit(10)]
+      ).catch(() => ({ documents: [] as TeamGuide[], total: 0 }));
+
+      const isFacultyRole =
+        profile.role.level === 20 ||
+        profile.role.name?.toLowerCase().includes("faculty") ||
+        profile.role.name?.toLowerCase().includes("guide") ||
+        profile.role.name?.toLowerCase().includes("project manager");
+
+      const isGuide = !isHod && (guideDocs.total > 0 || isFacultyRole);
+
+      // 3. Check student team assignment (member vs lead)
+      let isTeamLead = false;
+      let isStudent = false;
+      let teamId: string | null = null;
+      let teamData: {
+        id: string;
+        teamCode: string;
+        title: string;
+        abstract?: string | null;
+        projectId?: string | null;
+        leadMemberId?: string | null;
+        guideName?: string;
+        guideUserId?: string | null;
+      } | null = null;
+
+      if (!isHod && !isGuide) {
+        // Query academic_team_members
+        const memberTeams = await adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [Query.contains("member_id", [memberId, user.$id]), Query.limit(1)]
+        ).catch(() => ({ documents: [] as AcademicTeamMember[], total: 0 }));
+
+        if (memberTeams.total > 0) {
+          const atm = memberTeams.documents[0];
+          teamId = atm.team_id;
+          isTeamLead = atm.role === "LEAD";
+          isStudent = !isTeamLead;
+        } else {
+          // Check if lead_member_id in academic_teams
+          const leadTeams = await adminDatabases.listDocuments<AcademicTeam>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.contains("lead_member_id", [memberId, user.$id]), Query.limit(1)]
+          ).catch(() => ({ documents: [] as AcademicTeam[], total: 0 }));
+
+          if (leadTeams.total > 0) {
+            teamId = leadTeams.documents[0].id;
+            isTeamLead = true;
+            isStudent = false;
+          } else {
+            isStudent = true;
+          }
+        }
+
+        if (teamId) {
+          try {
+            const teamDoc = await adminDatabases.getDocument<AcademicTeam>(
+              DATABASE_ID,
+              ACADEMIC_TEAMS_ID,
+              teamId
+            );
+            const tgDoc = await adminDatabases.listDocuments<TeamGuide>(
+              DATABASE_ID,
+              TEAM_GUIDES_ID,
+              [Query.equal("team_id", teamId), Query.limit(1)]
+            ).catch(() => ({ documents: [] as TeamGuide[], total: 0 }));
+
+            let guideName = "Not Assigned";
+            let guideUserId: string | null = null;
+            if (tgDoc.total > 0) {
+              const gId = tgDoc.documents[0].guide_member_id;
+              const gMember = await adminDatabases.getDocument<{ name?: string; email?: string; userId?: string }>(
+                DATABASE_ID,
+                MEMBERS_ID,
+                gId
+              ).catch(() => null);
+              guideName = gMember?.name || gMember?.email || "Faculty Guide";
+              guideUserId = gMember?.userId || gId;
+            }
+
+            teamData = {
+              id: teamDoc.id,
+              teamCode: teamDoc.team_code,
+              title: teamDoc.title,
+              abstract: teamDoc.abstract,
+              projectId: teamDoc.project_id,
+              leadMemberId: teamDoc.lead_member_id,
+              guideName,
+              guideUserId,
+            };
+          } catch {
+            // fallback if team record lookup fails
+          }
+        }
+      }
+
+      // Persona Resolution & Strict Display Badges (zero Jira terminology)
+      let persona: "HOD" | "FACULTY_GUIDE" | "TEAM_LEAD" | "STUDENT";
+      let badgeLabel: "HOD / Coordinator" | "Faculty Guide" | "Team Lead" | "Student";
+
+      if (isHod) {
+        persona = "HOD";
+        badgeLabel = "HOD / Coordinator";
+      } else if (isGuide) {
+        persona = "FACULTY_GUIDE";
+        badgeLabel = "Faculty Guide";
+      } else if (isTeamLead) {
+        persona = "TEAM_LEAD";
+        badgeLabel = "Team Lead";
+      } else {
+        persona = "STUDENT";
+        badgeLabel = "Student";
+      }
+
+      return c.json({
+        data: {
+          persona,
+          badgeLabel,
+          isHod,
+          isGuide,
+          isTeamLead,
+          isStudent,
+          teamId,
+          team: teamData,
+          guidedTeamsCount: guideDocs.total,
+        },
+      });
+    }
+  )
   // ===========================================================================
   // 1. Batches: List and Create
   // ===========================================================================
@@ -289,29 +454,64 @@ const app = new Hono()
       );
       if (!profile) return c.json({ error: "Unauthorized" }, 401);
 
-      if (!can(profile, "college:teams.create") && !can(profile, "college:teams.manage")) {
+      const isGuideOrManager =
+        profile.role.name?.toLowerCase().includes("project manager") ||
+        profile.role.name?.toLowerCase().includes("faculty") ||
+        profile.role.name?.toLowerCase().includes("guide") ||
+        profile.role.level <= 20 ||
+        profile.isWorkspaceOwner ||
+        can(profile, "college:teams.create") ||
+        can(profile, "college:teams.manage");
+
+      if (!isGuideOrManager) {
         return deny(c, "college:teams.create");
       }
 
-      const teamId = ID.unique();
-      const newTeam = await adminDatabases.createDocument<AcademicTeam>(
+      // Check if team code already exists in this batch
+      const existingTeams = await adminDatabases.listDocuments<AcademicTeam>(
         DATABASE_ID,
         ACADEMIC_TEAMS_ID,
-        teamId,
-        {
-          id: teamId,
-          batch_id: batchId,
-          team_code: teamCode,
-          title,
-          abstract: abstract || null,
-          lead_member_id: leadMemberId || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-      );
+        [
+          Query.equal("batch_id", batchId),
+          Query.equal("team_code", teamCode),
+          Query.limit(1),
+        ]
+      ).catch(() => ({ total: 0, documents: [] as AcademicTeam[] }));
+
+      if (existingTeams.total > 0) {
+        return c.json(
+          { error: `Group code '${teamCode}' already exists in this batch. Please use a distinct group code.` },
+          409
+        );
+      }
+
+      const teamId = ID.unique();
+      const targetGuideId = guideMemberId || profile.id;
+
+      let newTeam: AcademicTeam;
+      try {
+        newTeam = await adminDatabases.createDocument<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          teamId,
+          {
+            id: teamId,
+            batch_id: batchId,
+            team_code: teamCode,
+            title,
+            abstract: abstract || null,
+            lead_member_id: leadMemberId || targetGuideId || profile.id,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+        );
+      } catch (err: unknown) {
+        console.error("Error creating academic team:", err);
+        const msg = err instanceof Error ? err.message : "Failed to create team";
+        return c.json({ error: msg }, 400);
+      }
 
       // 1. Auto-assign creating faculty guide (or guideMemberId passed)
-      const targetGuideId = guideMemberId || profile.memberId || profile.id;
       try {
         await adminDatabases.createDocument<TeamGuide>(
           DATABASE_ID,
@@ -380,7 +580,7 @@ const app = new Hono()
           {
             id: channelId,
             workspace_id: batch.workspace_id,
-            type: "GROUP",
+            type: "TEAM",
             name: `${teamCode.toUpperCase()} Discussion`,
             description: `Private chat channel for ${title}`,
             team_id: teamId,
@@ -391,18 +591,36 @@ const app = new Hono()
           }
         );
 
-        // Add faculty member as channel OWNER
-        await adminDatabases.createDocument(
-          DATABASE_ID,
-          CHANNEL_MEMBERS_ID,
-          ID.unique(),
-          {
-            channel_id: channelId,
-            member_id: user.$id,
-            role: "OWNER",
-            joined_at: new Date().toISOString(),
+        // Add ONLY assigned Faculty Guide as channel OWNER (NEVER HOD / Workspace Admin unless they are the assigned guide)
+        let guideUserId: string | null = null;
+        if (guideMemberId) {
+          try {
+            const guideMem = await adminDatabases.getDocument<{ userId?: string }>(
+              DATABASE_ID,
+              MEMBERS_ID,
+              guideMemberId
+            );
+            guideUserId = guideMem?.userId || guideMemberId;
+          } catch {
+            guideUserId = guideMemberId;
           }
-        );
+        } else if (!profile.isWorkspaceOwner && profile.role.level <= 20) {
+          guideUserId = user.$id;
+        }
+
+        if (guideUserId) {
+          await adminDatabases.createDocument(
+            DATABASE_ID,
+            CHANNEL_MEMBERS_ID,
+            ID.unique(),
+            {
+              channel_id: channelId,
+              member_id: guideUserId,
+              role: "OWNER",
+              joined_at: new Date().toISOString(),
+            }
+          );
+        }
       } catch {
         // Channel setup error ignored
       }
@@ -424,7 +642,7 @@ const app = new Hono()
             batch_id: batchId,
             target_role: "STUDENT",
             label: `Student Join Code for ${teamCode}`,
-            created_by_member_id: profile.memberId || profile.id || user.$id,
+            created_by_member_id: profile.id || user.$id,
             maxUses: 10,
             uses: 0,
             revoked: false,
@@ -509,6 +727,374 @@ const app = new Hono()
   )
 
   // ===========================================================================
+  // 2b. Faculty Student Management (Toggle Lead & Remove Student)
+  // ===========================================================================
+  .patch(
+    "/teams/:teamId/members/:memberId/role",
+    sessionMiddleware,
+    zValidator("json", z.object({ role: z.enum(["LEAD", "MEMBER"]) })),
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { teamId, memberId } = c.req.param();
+      const { role } = c.req.valid("json");
+
+      const adminDatabases = getAdminDatabases("college:update-member-role");
+
+      const team = await adminDatabases.getDocument<AcademicTeam>(
+        DATABASE_ID,
+        ACADEMIC_TEAMS_ID,
+        teamId
+      );
+      if (!team) return c.json({ error: "Team not found" }, 404);
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        team.batch_id
+      );
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        batch.workspace_id,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      // Check if user is the assigned guide or has admin management rights
+      const guidesDoc = await adminDatabases.listDocuments<TeamGuide>(
+        DATABASE_ID,
+        TEAM_GUIDES_ID,
+        [Query.equal("team_id", teamId)]
+      );
+      const isAssignedGuide = guidesDoc.documents.some(
+        (g) => g.guide_member_id === profile.id || g.guide_member_id === user.$id
+      );
+      const canManage =
+        isAssignedGuide ||
+        profile.role.level <= 20 ||
+        profile.role.name?.toLowerCase().includes("guide") ||
+        profile.role.name?.toLowerCase().includes("project manager") ||
+        can(profile, "college:teams.manage_members") ||
+        can(profile, "college:groups.manage") ||
+        profile.isWorkspaceOwner;
+
+      if (!canManage) {
+        return c.json({ error: "Only the assigned Faculty Guide or HOD can manage team roles" }, 403);
+      }
+
+      if (role === "LEAD") {
+        // Demote existing lead in this team
+        const currentLeads = await adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [Query.equal("team_id", teamId), Query.equal("role", "LEAD")]
+        );
+        for (const l of currentLeads.documents) {
+          const lId = l.id || (l as unknown as { $id?: string }).$id;
+          if (lId) {
+            await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, lId, {
+              role: "MEMBER",
+            });
+          }
+        }
+
+        // Promote target member
+        const targetMembers = await adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [Query.equal("team_id", teamId), Query.equal("member_id", memberId)]
+        );
+        if (targetMembers.documents.length > 0) {
+          const mId = targetMembers.documents[0].id || (targetMembers.documents[0] as unknown as { $id?: string }).$id;
+          if (mId) {
+            await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, mId, {
+              role: "LEAD",
+            });
+          }
+        } else {
+          await adminDatabases.createDocument(
+            DATABASE_ID,
+            ACADEMIC_TEAM_MEMBERS_ID,
+            ID.unique(),
+            {
+              team_id: teamId,
+              member_id: memberId,
+              role: "LEAD",
+              joined_at: new Date().toISOString(),
+            }
+          );
+        }
+
+        await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAMS_ID, teamId, {
+          lead_member_id: memberId,
+          updated_at: new Date().toISOString(),
+        });
+
+        // Upgrade workspace roleId if Team Lead role exists
+        try {
+          const rolesDoc = await adminDatabases.listDocuments<{ id: string; name: string }>(
+            DATABASE_ID,
+            ROLES_ID,
+            [Query.equal("workspaceId", batch.workspace_id)]
+          );
+          const leadRole = rolesDoc.documents.find(
+            (r) => r.name.toLowerCase().includes("team lead") || r.name.toLowerCase().includes("lead")
+          );
+          if (leadRole) {
+            await adminDatabases.updateDocument(DATABASE_ID, MEMBERS_ID, memberId, {
+              roleId: leadRole.id,
+            });
+          }
+        } catch {
+          // ignore role update fallback
+        }
+      } else {
+        // Demote to MEMBER
+        const targetMembers = await adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [Query.equal("team_id", teamId), Query.equal("member_id", memberId)]
+        );
+        if (targetMembers.documents.length > 0) {
+          const mId = targetMembers.documents[0].id || (targetMembers.documents[0] as unknown as { $id?: string }).$id;
+          if (mId) {
+            await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, mId, {
+              role: "MEMBER",
+            });
+          }
+        }
+
+        if (team.lead_member_id === memberId) {
+          await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAMS_ID, teamId, {
+            lead_member_id: null,
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        // Downgrade workspace roleId to Member if needed
+        try {
+          const rolesDoc = await adminDatabases.listDocuments<{ id: string; name: string }>(
+            DATABASE_ID,
+            ROLES_ID,
+            [Query.equal("workspaceId", batch.workspace_id)]
+          );
+          const memberRole = rolesDoc.documents.find(
+            (r) => r.name.toLowerCase() === "member" || r.name.toLowerCase().includes("student")
+          );
+          if (memberRole) {
+            await adminDatabases.updateDocument(DATABASE_ID, MEMBERS_ID, memberId, {
+              roleId: memberRole.id,
+            });
+          }
+        } catch {
+          // ignore role update fallback
+        }
+      }
+
+      return c.json({ data: { teamId, memberId, role } });
+    }
+  )
+
+  .post(
+    "/teams/:teamId/promote-lead",
+    sessionMiddleware,
+    zValidator("json", z.object({ studentMemberId: z.string() })),
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { teamId } = c.req.param();
+      const { studentMemberId } = c.req.valid("json");
+
+      const adminDatabases = getAdminDatabases("college:promote-team-lead");
+
+      const team = await adminDatabases.getDocument<AcademicTeam>(
+        DATABASE_ID,
+        ACADEMIC_TEAMS_ID,
+        teamId
+      );
+      if (!team) return c.json({ error: "Team not found" }, 404);
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        team.batch_id
+      );
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        batch.workspace_id,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const guidesDoc = await adminDatabases.listDocuments<TeamGuide>(
+        DATABASE_ID,
+        TEAM_GUIDES_ID,
+        [Query.equal("team_id", teamId)]
+      );
+      const isAssignedGuide = guidesDoc.documents.some(
+        (g) => g.guide_member_id === profile.id || g.guide_member_id === user.$id
+      );
+      const canManage =
+        isAssignedGuide ||
+        can(profile, "college:teams.manage_members") ||
+        can(profile, "college:groups.manage") ||
+        profile.isWorkspaceOwner;
+
+      if (!canManage) {
+        return c.json({ error: "Only the assigned Faculty Guide or HOD can assign team lead" }, 403);
+      }
+
+      // Demote existing lead in this team
+      const currentLeads = await adminDatabases.listDocuments<AcademicTeamMember>(
+        DATABASE_ID,
+        ACADEMIC_TEAM_MEMBERS_ID,
+        [Query.equal("team_id", teamId), Query.equal("role", "LEAD")]
+      );
+      for (const l of currentLeads.documents) {
+        const lId = l.id || (l as unknown as { $id?: string }).$id;
+        if (lId) {
+          await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, lId, {
+            role: "MEMBER",
+          });
+        }
+      }
+
+      // Promote target member
+      const targetMembers = await adminDatabases.listDocuments<AcademicTeamMember>(
+        DATABASE_ID,
+        ACADEMIC_TEAM_MEMBERS_ID,
+        [Query.equal("team_id", teamId), Query.equal("member_id", studentMemberId)]
+      );
+      if (targetMembers.documents.length > 0) {
+        const mId = targetMembers.documents[0].id || (targetMembers.documents[0] as unknown as { $id?: string }).$id;
+        if (mId) {
+          await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, mId, {
+            role: "LEAD",
+          });
+        }
+      } else {
+        await adminDatabases.createDocument(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          ID.unique(),
+          {
+            team_id: teamId,
+            member_id: studentMemberId,
+            role: "LEAD",
+            joined_at: new Date().toISOString(),
+          }
+        );
+      }
+
+      await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAMS_ID, teamId, {
+        lead_member_id: studentMemberId,
+        updated_at: new Date().toISOString(),
+      });
+
+      // Update workspace member roleId if Team Lead role exists
+      try {
+        const rolesDoc = await adminDatabases.listDocuments<{ id: string; name: string }>(
+          DATABASE_ID,
+          ROLES_ID,
+          [Query.equal("workspaceId", batch.workspace_id)]
+        );
+        const leadRole = rolesDoc.documents.find(
+          (r) => r.name.toLowerCase().includes("team lead") || r.name.toLowerCase().includes("lead")
+        );
+        if (leadRole) {
+          await adminDatabases.updateDocument(DATABASE_ID, MEMBERS_ID, studentMemberId, {
+            roleId: leadRole.id,
+          });
+        }
+      } catch {
+        // Ignore role update fallback
+      }
+
+      return c.json({
+        data: {
+          teamId,
+          leadMemberId: studentMemberId,
+          success: true,
+        },
+      });
+    }
+  )
+
+  .delete(
+    "/teams/:teamId/members/:memberId",
+    sessionMiddleware,
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { teamId, memberId } = c.req.param();
+
+      const adminDatabases = getAdminDatabases("college:remove-team-member");
+
+      const team = await adminDatabases.getDocument<AcademicTeam>(
+        DATABASE_ID,
+        ACADEMIC_TEAMS_ID,
+        teamId
+      );
+      if (!team) return c.json({ error: "Team not found" }, 404);
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        team.batch_id
+      );
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        batch.workspace_id,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const guidesDoc = await adminDatabases.listDocuments<TeamGuide>(
+        DATABASE_ID,
+        TEAM_GUIDES_ID,
+        [Query.equal("team_id", teamId)]
+      );
+      const isAssignedGuide = guidesDoc.documents.some(
+        (g) => g.guide_member_id === profile.id || g.guide_member_id === user.$id
+      );
+      const canManage =
+        isAssignedGuide ||
+        can(profile, "college:teams.manage_members") ||
+        can(profile, "college:groups.manage") ||
+        profile.isWorkspaceOwner;
+
+      if (!canManage) {
+        return c.json({ error: "Only the assigned Faculty Guide or HOD can remove team members" }, 403);
+      }
+
+      const targetMembers = await adminDatabases.listDocuments<AcademicTeamMember>(
+        DATABASE_ID,
+        ACADEMIC_TEAM_MEMBERS_ID,
+        [Query.equal("team_id", teamId), Query.equal("member_id", memberId)]
+      );
+
+      for (const m of targetMembers.documents) {
+        const mId = m.id || (m as unknown as { $id?: string }).$id;
+        if (mId) {
+          await adminDatabases.deleteDocument(DATABASE_ID, ACADEMIC_TEAM_MEMBERS_ID, mId);
+        }
+      }
+
+      if (team.lead_member_id === memberId) {
+        await adminDatabases.updateDocument(DATABASE_ID, ACADEMIC_TEAMS_ID, teamId, {
+          lead_member_id: null,
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      return c.json({ data: { success: true, teamId, memberId } });
+    }
+  )
+
+  // ===========================================================================
   // 3. Milestones & Rubrics
   // ===========================================================================
   .get(
@@ -589,6 +1175,856 @@ const app = new Hono()
         console.error("Error listing milestones:", err);
         return c.json({ data: [] });
       }
+    }
+  )
+
+  // ===========================================================================
+  // 3a. HOD Executive Milestone Overview Matrix
+  // ===========================================================================
+  .get(
+    "/batches/:batchId/hod-milestone-overview",
+    sessionMiddleware,
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { batchId } = c.req.param();
+
+      const adminDatabases = getAdminDatabases("college:hod-milestone-overview");
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        batchId
+      );
+      if (!batch) return c.json({ error: "Batch not found" }, 404);
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        batch.workspace_id,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const isHod =
+        (profile.role?.level !== undefined && profile.role.level <= 10) ||
+        can(profile, "college:batches.manage") ||
+        profile.isWorkspaceOwner;
+      if (!isHod) {
+        return c.json(
+          { error: "Only HOD and Department Coordinators can view Executive Milestone Overview" },
+          403
+        );
+      }
+
+      // Fetch batch milestones in sequence
+      const milestonesDoc = await adminDatabases.listDocuments<Milestone>(
+        DATABASE_ID,
+        MILESTONES_ID,
+        [Query.equal("batch_id", batchId), Query.orderAsc("order_index")]
+      );
+      const milestones = milestonesDoc.documents;
+
+      // Fetch all academic teams in batch
+      const teamsDoc = await adminDatabases.listDocuments<AcademicTeam>(
+        DATABASE_ID,
+        ACADEMIC_TEAMS_ID,
+        [Query.equal("batch_id", batchId), Query.orderAsc("team_code")]
+      );
+      const teams = teamsDoc.documents;
+      const teamIds = teams.map((t) => t.id);
+
+      if (teams.length === 0 || milestones.length === 0) {
+        return c.json({
+          data: {
+            batch,
+            milestones,
+            groups: [],
+            stats: {
+              total_groups: teams.length,
+              total_milestones: milestones.length,
+              completion_rate_percentage: 0,
+              stalled_groups_count: 0,
+              overdue_submissions_count: 0,
+              pending_faculty_review_count: 0,
+            },
+          },
+        });
+      }
+
+      // Fetch guides, members, and team members in parallel
+      const [guidesDoc, teamMembersDoc, workspaceMembersDoc] = await Promise.all([
+        adminDatabases.listDocuments<TeamGuide>(
+          DATABASE_ID,
+          TEAM_GUIDES_ID,
+          [Query.contains("team_id", teamIds)]
+        ),
+        adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [Query.contains("team_id", teamIds)]
+        ),
+        adminDatabases.listDocuments<{ id: string; userId: string; name?: string; email?: string }>(
+          DATABASE_ID,
+          MEMBERS_ID,
+          [Query.equal("workspaceId", batch.workspace_id)]
+        ),
+      ]);
+
+      const memberMap = new Map<string, { id: string; name: string; email: string }>();
+      for (const m of workspaceMembersDoc.documents) {
+        const displayName = m.name || m.email?.split("@")[0] || "User";
+        memberMap.set(m.id, { id: m.id, name: displayName, email: m.email || "" });
+        memberMap.set(m.userId, { id: m.id, name: displayName, email: m.email || "" });
+      }
+
+      const guideByTeam = new Map<string, string>();
+      for (const g of guidesDoc.documents) {
+        const u = memberMap.get(g.guide_member_id);
+        guideByTeam.set(g.team_id, u?.name || "Assigned Guide");
+      }
+
+      const teamRosterMap = new Map<string, { count: number; leadName: string }>();
+      for (const tm of teamMembersDoc.documents) {
+        const prev = teamRosterMap.get(tm.team_id) || { count: 0, leadName: "No Lead Assigned" };
+        prev.count += 1;
+        if (tm.role === "LEAD") {
+          const u = memberMap.get(tm.member_id);
+          prev.leadName = u?.name || "Student Lead";
+        }
+        teamRosterMap.set(tm.team_id, prev);
+      }
+
+      // Fetch all submissions for these teams
+      const milestoneIds = milestones.map((m) => m.id);
+      const submissionsDoc = await adminDatabases.listDocuments<Submission>(
+        DATABASE_ID,
+        SUBMISSIONS_ID,
+        [
+          Query.contains("team_id", teamIds),
+          Query.contains("milestone_id", milestoneIds),
+          Query.orderDesc("submitted_at"),
+        ]
+      );
+
+      // Latest submission per (team_id, milestone_id)
+      const submissionMap = new Map<string, Submission>();
+      for (const s of submissionsDoc.documents) {
+        const key = `${s.team_id}_${s.milestone_id}`;
+        if (!submissionMap.has(key)) {
+          submissionMap.set(key, s);
+        }
+      }
+
+      // Fetch evaluations for submissions
+      const subIds = Array.from(submissionMap.values()).map((s) => s.id);
+      let evaluationsDoc: { documents: Evaluation[] } = { documents: [] };
+      if (subIds.length > 0) {
+        evaluationsDoc = await adminDatabases.listDocuments<Evaluation>(
+          DATABASE_ID,
+          EVALUATIONS_ID,
+          [Query.contains("submission_id", subIds)]
+        );
+      }
+
+      const evaluationScoreMap = new Map<string, { totalScore: number; remarks?: string | null }>();
+      for (const ev of evaluationsDoc.documents) {
+        const prev = evaluationScoreMap.get(ev.submission_id) || { totalScore: 0, remarks: null };
+        prev.totalScore += Number(ev.score) || 0;
+        if (ev.feedback && !prev.remarks) prev.remarks = ev.feedback;
+        evaluationScoreMap.set(ev.submission_id, prev);
+      }
+
+      const now = new Date();
+      let totalApprovedCount = 0;
+      let totalOverdueCount = 0;
+      let totalPendingReviewCount = 0;
+      let stalledGroupsCount = 0;
+
+      const groupRows = teams.map((team) => {
+        const rosterInfo = teamRosterMap.get(team.id) || { count: 0, leadName: "Awaiting Students" };
+        let teamCompletedCount = 0;
+        let hasOverdue = false;
+
+        const cells = milestones.map((m) => {
+          const key = `${team.id}_${m.id}`;
+          const sub = submissionMap.get(key);
+          const evalData = sub ? evaluationScoreMap.get(sub.id) : null;
+
+          let status: "NOT_SUBMITTED" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED" | "OVERDUE" = "NOT_SUBMITTED";
+          let score: number | null = null;
+          const hasActiveSubmission = Boolean(sub && (sub.status === "APPROVED" || sub.status === "SUBMITTED" || (sub.status as string) === "UNDER_REVIEW"));
+          const isOverdue = Boolean(m.due_date && new Date(m.due_date) < now && !hasActiveSubmission);
+
+          if (sub) {
+            if (sub.status === "APPROVED") {
+              status = "APPROVED";
+              score = evalData ? evalData.totalScore : Number(m.max_marks);
+              teamCompletedCount++;
+              totalApprovedCount++;
+            } else if (sub.status === "CHANGES_REQUESTED") {
+              status = "CHANGES_REQUESTED";
+              score = evalData ? evalData.totalScore : null;
+            } else {
+              status = "SUBMITTED";
+              totalPendingReviewCount++;
+            }
+          } else if (isOverdue) {
+            status = "OVERDUE";
+            totalOverdueCount++;
+            hasOverdue = true;
+          }
+
+          return {
+            milestone_id: m.id,
+            milestone_title: m.title,
+            order_index: m.order_index,
+            status,
+            score,
+            max_marks: Number(m.max_marks) || 100,
+            is_overdue: isOverdue,
+            submitted_at: sub?.submitted_at || null,
+            file_url: sub?.file_url || null,
+            version: sub?.version || null,
+            remarks: evalData?.remarks || sub?.notes || null,
+          };
+        });
+
+        if (teamCompletedCount === 0 && hasOverdue) {
+          stalledGroupsCount++;
+        }
+
+        return {
+          team_id: team.id,
+          team_code: team.team_code,
+          project_title: team.title,
+          guide_name: guideByTeam.get(team.id) || "Not Assigned",
+          lead_name: rosterInfo.leadName,
+          member_count: rosterInfo.count,
+          milestones: cells,
+          completed_count: teamCompletedCount,
+        };
+      });
+
+      const totalPossible = teams.length * milestones.length;
+      const completionRate = totalPossible > 0 ? Math.round((totalApprovedCount / totalPossible) * 100) : 0;
+
+      return c.json({
+        data: {
+          batch,
+          milestones,
+          groups: groupRows,
+          stats: {
+            total_groups: teams.length,
+            total_milestones: milestones.length,
+            completion_rate_percentage: completionRate,
+            stalled_groups_count: stalledGroupsCount,
+            overdue_submissions_count: totalOverdueCount,
+            pending_faculty_review_count: totalPendingReviewCount,
+          },
+        },
+      });
+    }
+  )
+
+  // ===========================================================================
+  // 3b. Faculty Group Milestone Queue (Submissions for Guided Teams)
+  // ===========================================================================
+  .get(
+    "/batches/:batchId/guide-submissions",
+    sessionMiddleware,
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { batchId } = c.req.param();
+
+      const adminDatabases = getAdminDatabases("college:guide-submissions");
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        batchId
+      );
+      if (!batch) return c.json({ error: "Batch not found" }, 404);
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        batch.workspace_id,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const isHod = (profile.role?.level !== undefined && profile.role.level <= 10) || can(profile, "college:batches.manage") || profile.isWorkspaceOwner;
+
+      let targetTeamIds: string[] = [];
+      if (isHod) {
+        const allTeams = await adminDatabases.listDocuments<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          [Query.equal("batch_id", batchId)]
+        );
+        targetTeamIds = allTeams.documents.map((t) => t.id);
+      } else {
+        const currentMemberDocs = await adminDatabases.listDocuments<{ id: string; userId: string }>(
+          DATABASE_ID,
+          MEMBERS_ID,
+          [Query.equal("workspaceId", batch.workspace_id), Query.equal("userId", user.$id)]
+        );
+        const memberIds = currentMemberDocs.documents.map((m) => m.id);
+        const guideIdentifiers = Array.from(new Set([profile.id, user.$id, ...memberIds]));
+
+        const guideDoc = await adminDatabases.listDocuments<TeamGuide>(
+          DATABASE_ID,
+          TEAM_GUIDES_ID,
+          [Query.contains("guide_member_id", guideIdentifiers)]
+        );
+        const myTeamIds = guideDoc.documents.map((g) => g.team_id);
+        if (myTeamIds.length > 0) {
+          const batchTeams = await adminDatabases.listDocuments<AcademicTeam>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.equal("batch_id", batchId), Query.contains("id", myTeamIds)]
+          );
+          targetTeamIds = batchTeams.documents.map((t) => t.id);
+        }
+      }
+
+      if (targetTeamIds.length === 0) {
+        return c.json({ data: [] });
+      }
+
+      const [teamsDoc, milestonesDoc] = await Promise.all([
+        adminDatabases.listDocuments<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          [Query.contains("id", targetTeamIds)]
+        ),
+        adminDatabases.listDocuments<Milestone>(
+          DATABASE_ID,
+          MILESTONES_ID,
+          [Query.equal("batch_id", batchId), Query.orderAsc("order_index")]
+        ),
+      ]);
+
+      const teamMap = new Map<string, AcademicTeam>();
+      for (const t of teamsDoc.documents) teamMap.set(t.id, t);
+
+      const milestoneMap = new Map<string, Milestone>();
+      for (const m of milestonesDoc.documents) milestoneMap.set(m.id, m);
+
+      const milestoneIds = milestonesDoc.documents.map((m) => m.id);
+      let rubricsDoc: { documents: Rubric[] } = { documents: [] };
+      if (milestoneIds.length > 0) {
+        rubricsDoc = await adminDatabases.listDocuments<Rubric>(
+          DATABASE_ID,
+          RUBRICS_ID,
+          [Query.contains("milestone_id", milestoneIds)]
+        );
+      }
+      const rubricIds = rubricsDoc.documents.map((r) => r.id);
+
+      let criteriaDoc: { documents: RubricCriteria[] } = { documents: [] };
+      if (rubricIds.length > 0) {
+        criteriaDoc = await adminDatabases.listDocuments<RubricCriteria>(
+          DATABASE_ID,
+          RUBRIC_CRITERIA_ID,
+          [Query.contains("rubric_id", rubricIds), Query.orderAsc("order_index")]
+        );
+      }
+
+      const criteriaByMilestone = new Map<string, Array<{ id: string; title: string; description?: string | null; max_score: number }>>();
+      const rubricToMilestone = new Map<string, string>();
+      for (const r of rubricsDoc.documents) rubricToMilestone.set(r.id, r.milestone_id);
+
+      for (const c of criteriaDoc.documents) {
+        const mId = rubricToMilestone.get(c.rubric_id);
+        if (mId) {
+          const list = criteriaByMilestone.get(mId) || [];
+          list.push({
+            id: c.id,
+            title: c.title,
+            description: c.description || null,
+            max_score: Number(c.max_score) || 25,
+          });
+          criteriaByMilestone.set(mId, list);
+        }
+      }
+
+      const submissionsDoc = await adminDatabases.listDocuments<Submission>(
+        DATABASE_ID,
+        SUBMISSIONS_ID,
+        [
+          Query.contains("team_id", targetTeamIds),
+          Query.orderDesc("submitted_at"),
+        ]
+      );
+
+      const subIds = submissionsDoc.documents.map((s) => s.id);
+      let evaluationsDoc: { documents: Evaluation[] } = { documents: [] };
+      if (subIds.length > 0) {
+        evaluationsDoc = await adminDatabases.listDocuments<Evaluation>(
+          DATABASE_ID,
+          EVALUATIONS_ID,
+          [Query.contains("submission_id", subIds)]
+        );
+      }
+
+      const evalsBySub = new Map<string, Array<{ rubric_criteria_id: string; score: number; feedback?: string | null }>>();
+      const totalScoreBySub = new Map<string, number>();
+      const remarksBySub = new Map<string, string>();
+
+      for (const ev of evaluationsDoc.documents) {
+        const list = evalsBySub.get(ev.submission_id) || [];
+        list.push({
+          rubric_criteria_id: ev.rubric_criteria_id,
+          score: Number(ev.score) || 0,
+          feedback: ev.feedback || null,
+        });
+        evalsBySub.set(ev.submission_id, list);
+
+        const currentTotal = totalScoreBySub.get(ev.submission_id) || 0;
+        totalScoreBySub.set(ev.submission_id, currentTotal + (Number(ev.score) || 0));
+
+        if (ev.feedback && !remarksBySub.has(ev.submission_id)) {
+          remarksBySub.set(ev.submission_id, ev.feedback);
+        }
+      }
+
+      const submitterUserIds = Array.from(new Set(submissionsDoc.documents.map((s) => s.submitted_by)));
+      const membersDoc = await adminDatabases.listDocuments<{ id: string; userId: string; name?: string; email?: string }>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        submitterUserIds.length > 0 ? [Query.contains("userId", submitterUserIds)] : []
+      );
+      const userMap = new Map<string, string>();
+      for (const m of membersDoc.documents) {
+        userMap.set(m.userId, m.name || m.email || "Student");
+      }
+
+      const items: GuideSubmissionItem[] = submissionsDoc.documents.map((sub) => {
+        const team = teamMap.get(sub.team_id);
+        const milestone = milestoneMap.get(sub.milestone_id);
+        const criteria = criteriaByMilestone.get(sub.milestone_id) || [];
+        const evals = evalsBySub.get(sub.id) || [];
+
+        return {
+          submission_id: sub.id,
+          milestone_id: sub.milestone_id,
+          milestone_title: milestone?.title || "Milestone Review",
+          milestone_description: milestone?.description || null,
+          due_date: milestone?.due_date || null,
+          max_marks: Number(milestone?.max_marks) || 100,
+          team_id: sub.team_id,
+          team_code: team?.team_code || "GRP",
+          team_title: team?.title || "Academic Project",
+          status: sub.status as GuideSubmissionItem["status"],
+          notes: sub.notes || null,
+          file_url: sub.file_url || null,
+          version: sub.version || 1,
+          submitted_at: sub.submitted_at,
+          submitted_by_name: userMap.get(sub.submitted_by) || "Student Lead",
+          rubric_criteria: criteria,
+          evaluations: evals,
+          total_score: totalScoreBySub.has(sub.id) ? totalScoreBySub.get(sub.id)! : null,
+          remarks: remarksBySub.get(sub.id) || null,
+        };
+      });
+
+      return c.json({ data: items });
+    }
+  )
+
+  // ===========================================================================
+  // 3c. Faculty Workspace-level Milestone Queue (Submissions across batches)
+  // ===========================================================================
+  .get(
+    "/workspaces/:workspaceId/guide-submissions",
+    sessionMiddleware,
+    zValidator(
+      "query",
+      z.object({
+        batchId: z.string().optional(),
+      })
+    ),
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { workspaceId } = c.req.param();
+      const { batchId } = c.req.valid("query");
+
+      const adminDatabases = getAdminDatabases("college:workspace-guide-submissions");
+
+      const profile = await getMemberPermissionProfile(
+        databases,
+        workspaceId,
+        user.$id
+      );
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const currentMemberDocs = await adminDatabases.listDocuments<{ id: string; userId: string }>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        [Query.equal("workspaceId", workspaceId), Query.equal("userId", user.$id)]
+      );
+      const memberIds = currentMemberDocs.documents.map((m) => m.id);
+      const guideIdentifiers = Array.from(new Set([profile.id, user.$id, ...memberIds]));
+
+      const isHod =
+        (profile.role?.level !== undefined && profile.role.level <= 10) ||
+        can(profile, "college:batches.manage") ||
+        profile.isWorkspaceOwner;
+
+      let relevantBatchIds: string[] = [];
+      if (batchId && batchId !== "ALL") {
+        relevantBatchIds = [batchId];
+      } else {
+        const batchesDoc = await adminDatabases.listDocuments<Batch>(
+          DATABASE_ID,
+          BATCHES_ID,
+          [Query.equal("workspace_id", workspaceId)]
+        );
+        relevantBatchIds = batchesDoc.documents.map((b) => b.id);
+      }
+
+      if (relevantBatchIds.length === 0) {
+        return c.json({ data: [] });
+      }
+
+      let targetTeamIds: string[] = [];
+      if (isHod) {
+        const allTeams = await adminDatabases.listDocuments<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          [Query.contains("batch_id", relevantBatchIds)]
+        );
+        targetTeamIds = allTeams.documents.map((t) => t.id);
+      } else {
+        const guideDoc = await adminDatabases.listDocuments<TeamGuide>(
+          DATABASE_ID,
+          TEAM_GUIDES_ID,
+          [Query.contains("guide_member_id", guideIdentifiers)]
+        );
+        const myTeamIds = guideDoc.documents.map((g) => g.team_id);
+        if (myTeamIds.length > 0) {
+          const batchTeams = await adminDatabases.listDocuments<AcademicTeam>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.contains("batch_id", relevantBatchIds), Query.contains("id", myTeamIds)]
+          );
+          targetTeamIds = batchTeams.documents.map((t) => t.id);
+        }
+      }
+
+      if (targetTeamIds.length === 0) {
+        return c.json({ data: [] });
+      }
+
+      const [teamsDoc, milestonesDoc] = await Promise.all([
+        adminDatabases.listDocuments<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          [Query.contains("id", targetTeamIds)]
+        ),
+        adminDatabases.listDocuments<Milestone>(
+          DATABASE_ID,
+          MILESTONES_ID,
+          [Query.contains("batch_id", relevantBatchIds), Query.orderAsc("order_index")]
+        ),
+      ]);
+
+      const teamMap = new Map<string, AcademicTeam>();
+      for (const t of teamsDoc.documents) teamMap.set(t.id, t);
+
+      const milestoneMap = new Map<string, Milestone>();
+      for (const m of milestonesDoc.documents) milestoneMap.set(m.id, m);
+
+      const milestoneIds = milestonesDoc.documents.map((m) => m.id);
+      let rubricsDoc: { documents: Rubric[] } = { documents: [] };
+      if (milestoneIds.length > 0) {
+        rubricsDoc = await adminDatabases.listDocuments<Rubric>(
+          DATABASE_ID,
+          RUBRICS_ID,
+          [Query.contains("milestone_id", milestoneIds)]
+        );
+      }
+      const rubricIds = rubricsDoc.documents.map((r) => r.id);
+
+      let criteriaDoc: { documents: RubricCriteria[] } = { documents: [] };
+      if (rubricIds.length > 0) {
+        criteriaDoc = await adminDatabases.listDocuments<RubricCriteria>(
+          DATABASE_ID,
+          RUBRIC_CRITERIA_ID,
+          [Query.contains("rubric_id", rubricIds), Query.orderAsc("order_index")]
+        );
+      }
+
+      const criteriaByMilestone = new Map<string, Array<{ id: string; title: string; description?: string | null; max_score: number }>>();
+      const rubricToMilestone = new Map<string, string>();
+      for (const r of rubricsDoc.documents) rubricToMilestone.set(r.id, r.milestone_id);
+
+      for (const c of criteriaDoc.documents) {
+        const mId = rubricToMilestone.get(c.rubric_id);
+        if (mId) {
+          const list = criteriaByMilestone.get(mId) || [];
+          list.push({
+            id: c.id,
+            title: c.title,
+            description: c.description || null,
+            max_score: Number(c.max_score) || 25,
+          });
+          criteriaByMilestone.set(mId, list);
+        }
+      }
+
+      const submissionsDoc = await adminDatabases.listDocuments<Submission>(
+        DATABASE_ID,
+        SUBMISSIONS_ID,
+        [
+          Query.contains("team_id", targetTeamIds),
+          Query.orderDesc("submitted_at"),
+        ]
+      );
+
+      const subIds = submissionsDoc.documents.map((s) => s.id);
+      let evaluationsDoc: { documents: Evaluation[] } = { documents: [] };
+      if (subIds.length > 0) {
+        evaluationsDoc = await adminDatabases.listDocuments<Evaluation>(
+          DATABASE_ID,
+          EVALUATIONS_ID,
+          [Query.contains("submission_id", subIds)]
+        );
+      }
+
+      const evalsBySub = new Map<string, Array<{ rubric_criteria_id: string; score: number; feedback?: string | null }>>();
+      const totalScoreBySub = new Map<string, number>();
+      const remarksBySub = new Map<string, string>();
+
+      for (const ev of evaluationsDoc.documents) {
+        const list = evalsBySub.get(ev.submission_id) || [];
+        list.push({
+          rubric_criteria_id: ev.rubric_criteria_id,
+          score: Number(ev.score) || 0,
+          feedback: ev.feedback || null,
+        });
+        evalsBySub.set(ev.submission_id, list);
+
+        const currentTotal = totalScoreBySub.get(ev.submission_id) || 0;
+        totalScoreBySub.set(ev.submission_id, currentTotal + (Number(ev.score) || 0));
+
+        if (ev.feedback && !remarksBySub.has(ev.submission_id)) {
+          remarksBySub.set(ev.submission_id, ev.feedback);
+        }
+      }
+
+      const submitterUserIds = Array.from(new Set(submissionsDoc.documents.map((s) => s.submitted_by)));
+      const membersDoc = await adminDatabases.listDocuments<{ id: string; userId: string; name?: string; email?: string }>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        submitterUserIds.length > 0 ? [Query.contains("userId", submitterUserIds)] : []
+      );
+      const userMap = new Map<string, string>();
+      for (const m of membersDoc.documents) {
+        userMap.set(m.userId, m.name || m.email || "Student");
+      }
+
+      const items: GuideSubmissionItem[] = submissionsDoc.documents.map((sub) => {
+        const team = teamMap.get(sub.team_id);
+        const milestone = milestoneMap.get(sub.milestone_id);
+        const criteria = criteriaByMilestone.get(sub.milestone_id) || [];
+        const evals = evalsBySub.get(sub.id) || [];
+
+        return {
+          submission_id: sub.id,
+          milestone_id: sub.milestone_id,
+          milestone_title: milestone?.title || "Milestone Review",
+          milestone_description: milestone?.description || null,
+          due_date: milestone?.due_date || null,
+          max_marks: Number(milestone?.max_marks) || 100,
+          team_id: sub.team_id,
+          team_code: team?.team_code || "GRP",
+          team_title: team?.title || "Academic Project",
+          status: sub.status as GuideSubmissionItem["status"],
+          notes: sub.notes || null,
+          file_url: sub.file_url || null,
+          version: sub.version || 1,
+          submitted_at: sub.submitted_at,
+          submitted_by_name: userMap.get(sub.submitted_by) || "Student Lead",
+          rubric_criteria: criteria,
+          evaluations: evals,
+          total_score: totalScoreBySub.has(sub.id) ? totalScoreBySub.get(sub.id)! : null,
+          remarks: remarksBySub.get(sub.id) || null,
+        };
+      });
+
+      return c.json({ data: items });
+    }
+  )
+
+  // ===========================================================================
+  // 3d. Student Group Milestone View
+  // ===========================================================================
+  .get(
+    "/teams/:teamId/milestones",
+    sessionMiddleware,
+    async (c) => {
+      const { teamId } = c.req.param();
+
+      const adminDatabases = getAdminDatabases("college:team-milestones");
+
+      const team = await adminDatabases.getDocument<AcademicTeam>(
+        DATABASE_ID,
+        ACADEMIC_TEAMS_ID,
+        teamId
+      );
+      if (!team) return c.json({ error: "Team not found" }, 404);
+
+      const batch = await adminDatabases.getDocument<Batch>(
+        DATABASE_ID,
+        BATCHES_ID,
+        team.batch_id
+      );
+
+      const milestonesDoc = await adminDatabases.listDocuments<Milestone>(
+        DATABASE_ID,
+        MILESTONES_ID,
+        [Query.equal("batch_id", team.batch_id), Query.orderAsc("order_index")]
+      );
+
+      const milestoneIds = milestonesDoc.documents.map((m) => m.id);
+      let rubricsDoc: { documents: Rubric[] } = { documents: [] };
+      if (milestoneIds.length > 0) {
+        rubricsDoc = await adminDatabases.listDocuments<Rubric>(
+          DATABASE_ID,
+          RUBRICS_ID,
+          [Query.contains("milestone_id", milestoneIds)]
+        );
+      }
+      const rubricIds = rubricsDoc.documents.map((r) => r.id);
+      const rubricToMilestone = new Map<string, string>();
+      for (const r of rubricsDoc.documents) rubricToMilestone.set(r.id, r.milestone_id);
+
+      let criteriaDoc: { documents: RubricCriteria[] } = { documents: [] };
+      if (rubricIds.length > 0) {
+        criteriaDoc = await adminDatabases.listDocuments<RubricCriteria>(
+          DATABASE_ID,
+          RUBRIC_CRITERIA_ID,
+          [Query.contains("rubric_id", rubricIds), Query.orderAsc("order_index")]
+        );
+      }
+      const criteriaByMilestone = new Map<string, Array<{ id: string; title: string; max_score: number }>>();
+      for (const c of criteriaDoc.documents) {
+        const mId = rubricToMilestone.get(c.rubric_id);
+        if (mId) {
+          const list = criteriaByMilestone.get(mId) || [];
+          list.push({ id: c.id, title: c.title, max_score: Number(c.max_score) || 25 });
+          criteriaByMilestone.set(mId, list);
+        }
+      }
+
+      const submissionsDoc = await adminDatabases.listDocuments<Submission>(
+        DATABASE_ID,
+        SUBMISSIONS_ID,
+        [Query.equal("team_id", teamId), Query.orderDesc("submitted_at")]
+      );
+
+      const latestSubByMilestone = new Map<string, Submission>();
+      for (const s of submissionsDoc.documents) {
+        if (!latestSubByMilestone.has(s.milestone_id)) {
+          latestSubByMilestone.set(s.milestone_id, s);
+        }
+      }
+
+      const subIds = submissionsDoc.documents.map((s) => s.id);
+      let evaluationsDoc: { documents: Evaluation[] } = { documents: [] };
+      if (subIds.length > 0) {
+        evaluationsDoc = await adminDatabases.listDocuments<Evaluation>(
+          DATABASE_ID,
+          EVALUATIONS_ID,
+          [Query.contains("submission_id", subIds)]
+        );
+      }
+
+      const evalMap = new Map<string, { totalScore: number; remarks?: string | null; gradedAt: string; evaluatorId: string }>();
+      for (const ev of evaluationsDoc.documents) {
+        const prev = evalMap.get(ev.submission_id) || { totalScore: 0, remarks: null, gradedAt: ev.created_at, evaluatorId: ev.evaluator_member_id };
+        prev.totalScore += Number(ev.score) || 0;
+        if (ev.feedback && !prev.remarks) prev.remarks = ev.feedback;
+        evalMap.set(ev.submission_id, prev);
+      }
+
+      const now = new Date();
+
+      const items: TeamMilestoneItem[] = milestonesDoc.documents.map((m) => {
+        const sub = latestSubByMilestone.get(m.id);
+        const evData = sub ? evalMap.get(sub.id) : null;
+        const hasActiveSub = Boolean(sub && (sub.status === "APPROVED" || sub.status === "SUBMITTED" || (sub.status as string) === "UNDER_REVIEW"));
+        const isOverdue = Boolean(m.due_date && new Date(m.due_date) < now && !hasActiveSub);
+
+        let status: TeamMilestoneItem["status"] = "NOT_SUBMITTED";
+        if (sub) {
+          if (sub.status === "APPROVED") status = "APPROVED";
+          else if (sub.status === "CHANGES_REQUESTED") status = "CHANGES_REQUESTED";
+          else status = "SUBMITTED";
+        } else if (isOverdue) {
+          status = "OVERDUE";
+        }
+
+        let countdown = "No deadline set";
+        if (sub?.status === "APPROVED") {
+          countdown = evData?.totalScore !== undefined && evData?.totalScore !== null
+            ? `Approved (${evData.totalScore}/${Number(m.max_marks) || 100})`
+            : "Approved";
+        } else if (sub?.status === "SUBMITTED") {
+          countdown = "Under Guide Review";
+        } else if (sub?.status === "CHANGES_REQUESTED") {
+          countdown = "Changes Requested";
+        } else if (m.due_date) {
+          const due = new Date(m.due_date);
+          const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays < 0) countdown = `Overdue by ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"}`;
+          else if (diffDays === 0) countdown = "Due today";
+          else countdown = `Due in ${diffDays} day${diffDays === 1 ? "" : "s"}`;
+        }
+
+        return {
+          id: m.id,
+          batch_id: m.batch_id,
+          title: m.title,
+          description: m.description || null,
+          due_date: m.due_date || null,
+          max_marks: Number(m.max_marks) || 100,
+          order_index: m.order_index,
+          status,
+          submission: sub
+            ? {
+                id: sub.id,
+                file_url: sub.file_url || null,
+                notes: sub.notes || null,
+                status: sub.status as "DRAFT" | "SUBMITTED" | "CHANGES_REQUESTED" | "APPROVED",
+                submitted_at: sub.submitted_at,
+                version: sub.version || 1,
+              }
+            : null,
+          grade: evData
+            ? {
+                score: evData.totalScore,
+                total_score: evData.totalScore,
+                remarks: evData.remarks || null,
+                graded_at: evData.gradedAt,
+              }
+            : null,
+          is_overdue: isOverdue,
+          countdown_label: countdown,
+          rubric_criteria: criteriaByMilestone.get(m.id) || [],
+        };
+      });
+
+      return c.json({
+        data: {
+          team,
+          batch,
+          milestones: items,
+        },
+      });
     }
   )
 
@@ -1199,6 +2635,357 @@ const app = new Hono()
   )
 
   // ===========================================================================
+  // 12b. Guide Full Dashboard Matrix (Groups, Student Rosters, Pending Reviews)
+  // ===========================================================================
+  .get(
+    "/guide/dashboard",
+    sessionMiddleware,
+    zValidator(
+      "query",
+      z.object({
+        workspaceId: z.string().trim().min(1),
+      })
+    ),
+    async (c) => {
+      const user = c.get("user");
+      const { workspaceId } = c.req.valid("query");
+
+      const adminDatabases = getAdminDatabases("college:get-guide-dashboard");
+
+      // Find guide's membership ID in workspace
+      const currentMemberDoc = await adminDatabases.listDocuments<{ id: string; userId: string }>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        [Query.equal("workspaceId", workspaceId), Query.equal("userId", user.$id)]
+      );
+
+      const memberId = currentMemberDoc.documents[0]?.id;
+      if (!memberId) {
+        return c.json({
+          data: {
+            groups: [],
+            totalStudents: 0,
+            totalPendingReviews: 0,
+            batches: [],
+          },
+        });
+      }
+
+      // Find teams assigned to this guide
+      const guideTeamsDoc = await adminDatabases.listDocuments<TeamGuide>(
+        DATABASE_ID,
+        TEAM_GUIDES_ID,
+        [Query.contains("guide_member_id", [memberId, user.$id])]
+      );
+
+      const teamIds = guideTeamsDoc.documents.map((g) => g.team_id);
+      if (teamIds.length === 0) {
+        // Fetch batches in this workspace so faculty can still create their first group
+        const batchesDoc = await adminDatabases.listDocuments<Batch>(
+          DATABASE_ID,
+          BATCHES_ID,
+          [Query.equal("workspace_id", workspaceId)]
+        );
+
+        return c.json({
+          data: {
+            groups: [],
+            totalStudents: 0,
+            totalPendingReviews: 0,
+            batches: batchesDoc.documents,
+          },
+        });
+      }
+
+      // Fetch teams, members, invite codes, channels, tasks, and batches
+      const [teamsDoc, allTeamMembersDoc, workspaceMembersDoc, inviteLinksDoc, channelsDoc, batchesDoc] =
+        await Promise.all([
+          adminDatabases.listDocuments<AcademicTeam>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.contains("id", teamIds), Query.orderAsc("team_code")]
+          ),
+          adminDatabases.listDocuments<AcademicTeamMember>(
+            DATABASE_ID,
+            ACADEMIC_TEAM_MEMBERS_ID,
+            [Query.contains("team_id", teamIds)]
+          ),
+          adminDatabases.listDocuments<{ id: string; userId: string; name?: string; email?: string }>(
+            DATABASE_ID,
+            MEMBERS_ID,
+            [Query.equal("workspaceId", workspaceId)]
+          ),
+          adminDatabases.listDocuments<{
+            id: string;
+            code: string;
+            academic_team_id?: string;
+            revoked?: boolean;
+          }>(
+            DATABASE_ID,
+            INVITE_LINKS_ID,
+            [Query.equal("workspaceId", workspaceId), Query.equal("revoked", false)]
+          ),
+          adminDatabases.listDocuments<{ id: string; team_id?: string }>(
+            DATABASE_ID,
+            CHANNELS_ID,
+            [Query.equal("workspace_id", workspaceId), Query.contains("team_id", teamIds)]
+          ),
+          adminDatabases.listDocuments<Batch>(
+            DATABASE_ID,
+            BATCHES_ID,
+            [Query.equal("workspace_id", workspaceId)]
+          ),
+        ]);
+
+      const memberMap = new Map<string, { id: string; name: string; email: string }>();
+      for (const m of workspaceMembersDoc.documents) {
+        memberMap.set(m.id, {
+          id: m.id,
+          name: m.name || m.email?.split("@")[0] || "Student",
+          email: m.email || "",
+        });
+        memberMap.set(m.userId, {
+          id: m.id,
+          name: m.name || m.email?.split("@")[0] || "Student",
+          email: m.email || "",
+        });
+      }
+
+      const batchMap = new Map<string, string>();
+      for (const b of batchesDoc.documents) {
+        batchMap.set(b.id, b.name);
+      }
+
+      // Map channels by team_id
+      const channelByTeam = new Map<string, string>();
+      for (const ch of channelsDoc.documents) {
+        if (ch.team_id) channelByTeam.set(ch.team_id, ch.id);
+      }
+
+      // Map latest invite code by academic_team_id
+      const codeByTeam = new Map<string, string>();
+      for (const link of inviteLinksDoc.documents) {
+        if (link.academic_team_id && !codeByTeam.has(link.academic_team_id)) {
+          codeByTeam.set(link.academic_team_id, link.code);
+        }
+      }
+
+      // Group members by team_id
+      const membersByTeam = new Map<string, Array<{
+        id: string;
+        memberId: string;
+        name: string;
+        email: string;
+        role: "LEAD" | "MEMBER";
+        joined_at?: string;
+      }>>();
+
+      for (const tm of allTeamMembersDoc.documents) {
+        const u = memberMap.get(tm.member_id) || {
+          id: tm.member_id,
+          name: "Student",
+          email: "",
+        };
+        const list = membersByTeam.get(tm.team_id) || [];
+        list.push({
+          id: tm.id || (tm as unknown as { $id?: string }).$id || tm.member_id,
+          memberId: tm.member_id,
+          name: u.name,
+          email: u.email,
+          role: tm.role || "MEMBER",
+          joined_at: tm.joined_at,
+        });
+        membersByTeam.set(tm.team_id, list);
+      }
+
+      // Fetch pending review tasks
+      const projectIds = teamsDoc.documents.map((t) => t.project_id).filter(Boolean) as string[];
+      let tasksDoc: { documents: Task[] } = { documents: [] };
+      if (projectIds.length > 0) {
+        try {
+          tasksDoc = await adminDatabases.listDocuments<Task>(
+            DATABASE_ID,
+            TASKS_ID,
+            [Query.contains("projectId", projectIds)]
+          );
+        } catch {
+          // ignore
+        }
+      }
+
+      const tasksByProject = new Map<string, Task[]>();
+      for (const t of tasksDoc.documents) {
+        const list = tasksByProject.get(t.projectId) || [];
+        list.push(t);
+        tasksByProject.set(t.projectId, list);
+      }
+
+      let totalStudents = 0;
+      let totalPendingReviews = 0;
+
+      const groups = teamsDoc.documents.map((team) => {
+        const roster = membersByTeam.get(team.id) || [];
+        totalStudents += roster.length;
+
+        const teamTasks = team.project_id ? tasksByProject.get(team.project_id) || [] : [];
+        const pendingTasks = teamTasks.filter(
+          (t) => t.verification_status === "PENDING_GUIDE_REVIEW"
+        );
+        totalPendingReviews += pendingTasks.length;
+
+        const completedTasksCount = teamTasks.filter(
+          (t) => t.status === TaskStatus.DONE || t.verification_status === "APPROVED"
+        ).length;
+
+        return {
+          id: team.id,
+          team_code: team.team_code,
+          title: team.title,
+          abstract: team.abstract || null,
+          batch_id: team.batch_id,
+          batch_name: batchMap.get(team.batch_id) || "Default Batch",
+          student_join_code: codeByTeam.get(team.id) || `${team.team_code}-JOIN`,
+          channel_id: channelByTeam.get(team.id) || null,
+          lead_member_id: team.lead_member_id || null,
+          roster,
+          pendingTasksCount: pendingTasks.length,
+          totalTasksCount: teamTasks.length,
+          completedTasksCount,
+        };
+      });
+
+      return c.json({
+        data: {
+          groups,
+          totalStudents,
+          totalPendingReviews,
+          batches: batchesDoc.documents,
+        },
+      });
+    }
+  )
+
+  // ===========================================================================
+  // 12c. HOD Real-Time Progress Matrix Alias
+  // ===========================================================================
+  .get(
+    "/batches/:batchId/hod-overview",
+    sessionMiddleware,
+    async (c) => {
+      const { batchId } = c.req.param();
+      const adminDatabases = getAdminDatabases("college:get-hod-overview");
+
+      const batch = await adminDatabases
+        .getDocument<Batch>(DATABASE_ID, BATCHES_ID, batchId)
+        .catch(() => null);
+
+      if (!batch) return c.json({ error: "Batch not found" }, 404);
+
+      // In-memory aggregation of all groups across this batch
+      try {
+        const [teamsDoc, teamGuidesDoc, teamMembersDoc, workspaceMembersDoc] =
+          await Promise.all([
+            adminDatabases.listDocuments<AcademicTeam>(
+              DATABASE_ID,
+              ACADEMIC_TEAMS_ID,
+              [Query.equal("batch_id", batchId), Query.orderAsc("team_code")]
+            ),
+            adminDatabases.listDocuments<TeamGuide>(DATABASE_ID, TEAM_GUIDES_ID, []),
+            adminDatabases.listDocuments<AcademicTeamMember>(
+              DATABASE_ID,
+              ACADEMIC_TEAM_MEMBERS_ID,
+              []
+            ),
+            adminDatabases.listDocuments<{ id: string; userId: string; name?: string; email?: string }>(
+              DATABASE_ID,
+              MEMBERS_ID,
+              [Query.equal("workspaceId", batch.workspace_id)]
+            ),
+          ]);
+
+        const memberMap = new Map<string, string>();
+        for (const m of workspaceMembersDoc.documents) {
+          memberMap.set(m.id, m.name || m.email?.split("@")[0] || "Member");
+          memberMap.set(m.userId, m.name || m.email?.split("@")[0] || "Member");
+        }
+
+        const guideByTeam = new Map<string, { id: string; name: string }>();
+        for (const g of teamGuidesDoc.documents) {
+          guideByTeam.set(g.team_id, {
+            id: g.guide_member_id,
+            name: memberMap.get(g.guide_member_id) || "Faculty Guide",
+          });
+        }
+
+        const studentCountByTeam = new Map<string, number>();
+        for (const tm of teamMembersDoc.documents) {
+          studentCountByTeam.set(tm.team_id, (studentCountByTeam.get(tm.team_id) || 0) + 1);
+        }
+
+        const projectIds = teamsDoc.documents.map((t) => t.project_id).filter(Boolean) as string[];
+        let tasksDoc: { documents: Task[] } = { documents: [] };
+        if (projectIds.length > 0) {
+          try {
+            tasksDoc = await adminDatabases.listDocuments<Task>(
+              DATABASE_ID,
+              TASKS_ID,
+              [Query.contains("projectId", projectIds)]
+            );
+          } catch {
+            // ignore
+          }
+        }
+
+        const tasksByProject = new Map<string, Task[]>();
+        for (const t of tasksDoc.documents) {
+          const list = tasksByProject.get(t.projectId) || [];
+          list.push(t);
+          tasksByProject.set(t.projectId, list);
+        }
+
+        const overview = teamsDoc.documents.map((t) => {
+          const teamTasks = t.project_id ? tasksByProject.get(t.project_id) || [] : [];
+          const total_tasks = teamTasks.length;
+          const completed_tasks = teamTasks.filter(
+            (task) =>
+              task.status === TaskStatus.DONE ||
+              task.verification_status === "APPROVED"
+          ).length;
+          const pending_review_tasks = teamTasks.filter(
+            (task) => task.verification_status === "PENDING_GUIDE_REVIEW"
+          ).length;
+
+          const progress_percentage =
+            total_tasks > 0 ? Math.round((completed_tasks / total_tasks) * 100) : 0;
+
+          const guide = guideByTeam.get(t.id);
+          const leadName = t.lead_member_id ? memberMap.get(t.lead_member_id) || "Assigned Lead" : "Unassigned";
+
+          return {
+            team_id: t.id,
+            team_code: t.team_code,
+            project_title: t.title,
+            guide_id: guide?.id || null,
+            guide_name: guide?.name || "Not Allocated",
+            lead_name: leadName,
+            student_count: studentCountByTeam.get(t.id) || 0,
+            total_tasks,
+            completed_tasks,
+            pending_review_tasks,
+            progress_percentage,
+            latest_activity_timestamp: t.updated_at || t.created_at,
+          };
+        });
+
+        return c.json({ data: overview });
+      } catch (err: unknown) {
+        console.error("Error generating HOD overview:", err);
+        return c.json({ data: [] });
+      }
+    }
+  )
+
+  // ===========================================================================
   // 13. Guide Verification Queue (Pending Tasks for Verification)
   // ===========================================================================
   .get(
@@ -1238,11 +3025,11 @@ const app = new Hono()
         );
         targetTeams = allTeams.documents;
       } else {
-        // Faculty Guide sees only assigned groups
+        // Faculty Guide sees only assigned groups (check both memberId and user.$id)
         const guideDoc = await adminDatabases.listDocuments<TeamGuide>(
           DATABASE_ID,
           TEAM_GUIDES_ID,
-          [Query.contains("guide_member_id", [user.$id])]
+          [Query.contains("guide_member_id", [profile.id, user.$id])]
         );
 
         const teamIds = guideDoc.documents.map((g) => g.team_id);
@@ -1266,16 +3053,23 @@ const app = new Hono()
         if (t.project_id) teamByProjectId.set(t.project_id, t);
       }
 
-      const pendingTasksDoc = await adminDatabases.listDocuments<Task>(
+      const allTasksDoc = await adminDatabases.listDocuments<Task>(
         DATABASE_ID,
         TASKS_ID,
         [
           Query.contains("projectId", projectIds),
-          Query.equal("status", TaskStatus.IN_REVIEW),
         ]
       );
 
-      const memberIds = Array.from(new Set(pendingTasksDoc.documents.map((t) => t.assigneeId)));
+      // Filter tasks pending verification/review
+      const pendingTasks = allTasksDoc.documents.filter(
+        (t) =>
+          t.status === TaskStatus.IN_REVIEW ||
+          t.verification_status === "PENDING_GUIDE_REVIEW" ||
+          (t as unknown as { review_status?: string }).review_status === "READY_FOR_REVIEW"
+      );
+
+      const memberIds = Array.from(new Set(pendingTasks.map((t) => t.assigneeId).filter(Boolean)));
       const membersDoc = await adminDatabases.listDocuments<{ id: string; name?: string; email?: string }>(
         DATABASE_ID,
         MEMBERS_ID,
@@ -1287,14 +3081,153 @@ const app = new Hono()
         memberNameMap.set(m.id, m.name || m.email || "Student");
       }
 
-      const items: GuideTaskVerificationItem[] = pendingTasksDoc.documents.map((task) => {
+      const items: GuideTaskVerificationItem[] = pendingTasks.map((task) => {
         const team = teamByProjectId.get(task.projectId);
+        const tAny = task as unknown as {
+          review_status?: string;
+          submission_notes?: string | null;
+          submission_file_url?: string | null;
+          submitted_for_review_at?: string | null;
+          reviewer_feedback?: string | null;
+        };
+
         return {
           id: task.$id || task.id,
           name: task.name,
           status: task.status,
           verification_status:
             task.verification_status || "PENDING_GUIDE_REVIEW",
+          review_status: (tAny.review_status as GuideTaskVerificationItem["review_status"]) || "READY_FOR_REVIEW",
+          submission_notes: tAny.submission_notes || null,
+          submission_file_url: tAny.submission_file_url || null,
+          submitted_for_review_at: tAny.submitted_for_review_at || null,
+          reviewer_feedback: tAny.reviewer_feedback || task.guide_feedback || null,
+          guide_feedback: task.guide_feedback || null,
+          verified_at: task.verified_at || null,
+          verified_by: task.verified_by || null,
+          due_date: task.dueDate,
+          team_id: team?.id || "",
+          team_code: team?.team_code || "GRP",
+          team_title: team?.title || "Academic Project",
+          assignee_name: memberNameMap.get(task.assigneeId) || "Student",
+        };
+      });
+
+      return c.json({ data: items });
+    }
+  )
+
+  // Alias for guide verification queue
+  .get(
+    "/guide/verification-queue",
+    sessionMiddleware,
+    zValidator(
+      "query",
+      z.object({
+        workspaceId: z.string().trim().min(1),
+        batchId: z.string().optional(),
+      })
+    ),
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { workspaceId, batchId } = c.req.valid("query");
+
+      const profile = await getMemberPermissionProfile(databases, workspaceId, user.$id);
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const isHod = (profile.role?.level !== undefined && profile.role.level <= 10) || can(profile, "college:batches.manage");
+      const adminDatabases = getAdminDatabases("college:get-verification-queue");
+
+      let targetTeams: AcademicTeam[] = [];
+
+      if (isHod) {
+        const teamQueries = [Query.orderAsc("team_code")];
+        if (batchId) {
+          teamQueries.push(Query.equal("batch_id", batchId));
+        }
+        const allTeams = await adminDatabases.listDocuments<AcademicTeam>(
+          DATABASE_ID,
+          ACADEMIC_TEAMS_ID,
+          teamQueries
+        );
+        targetTeams = allTeams.documents;
+      } else {
+        const guideDoc = await adminDatabases.listDocuments<TeamGuide>(
+          DATABASE_ID,
+          TEAM_GUIDES_ID,
+          [Query.contains("guide_member_id", [profile.id, user.$id])]
+        );
+
+        const teamIds = guideDoc.documents.map((g) => g.team_id);
+        if (teamIds.length > 0) {
+          const guideTeams = await adminDatabases.listDocuments<AcademicTeam>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.contains("id", teamIds)]
+          );
+          targetTeams = guideTeams.documents;
+        }
+      }
+
+      const projectIds = targetTeams.map((t) => t.project_id).filter(Boolean) as string[];
+      if (projectIds.length === 0) {
+        return c.json({ data: [] });
+      }
+
+      const teamByProjectId = new Map<string, AcademicTeam>();
+      for (const t of targetTeams) {
+        if (t.project_id) teamByProjectId.set(t.project_id, t);
+      }
+
+      const allTasksDoc = await adminDatabases.listDocuments<Task>(
+        DATABASE_ID,
+        TASKS_ID,
+        [
+          Query.contains("projectId", projectIds),
+        ]
+      );
+
+      const pendingTasks = allTasksDoc.documents.filter(
+        (t) =>
+          t.status === TaskStatus.IN_REVIEW ||
+          t.verification_status === "PENDING_GUIDE_REVIEW" ||
+          (t as unknown as { review_status?: string }).review_status === "READY_FOR_REVIEW"
+      );
+
+      const memberIds = Array.from(new Set(pendingTasks.map((t) => t.assigneeId).filter(Boolean)));
+      const membersDoc = await adminDatabases.listDocuments<{ id: string; name?: string; email?: string }>(
+        DATABASE_ID,
+        MEMBERS_ID,
+        memberIds.length > 0 ? [Query.contains("id", memberIds)] : []
+      );
+
+      const memberNameMap = new Map<string, string>();
+      for (const m of membersDoc.documents) {
+        memberNameMap.set(m.id, m.name || m.email || "Student");
+      }
+
+      const items: GuideTaskVerificationItem[] = pendingTasks.map((task) => {
+        const team = teamByProjectId.get(task.projectId);
+        const tAny = task as unknown as {
+          review_status?: string;
+          submission_notes?: string | null;
+          submission_file_url?: string | null;
+          submitted_for_review_at?: string | null;
+          reviewer_feedback?: string | null;
+        };
+
+        return {
+          id: task.$id || task.id,
+          name: task.name,
+          status: task.status,
+          verification_status:
+            task.verification_status || "PENDING_GUIDE_REVIEW",
+          review_status: (tAny.review_status as GuideTaskVerificationItem["review_status"]) || "READY_FOR_REVIEW",
+          submission_notes: tAny.submission_notes || null,
+          submission_file_url: tAny.submission_file_url || null,
+          submitted_for_review_at: tAny.submitted_for_review_at || null,
+          reviewer_feedback: tAny.reviewer_feedback || task.guide_feedback || null,
           guide_feedback: task.guide_feedback || null,
           verified_at: task.verified_at || null,
           verified_by: task.verified_by || null,
@@ -1311,8 +3244,49 @@ const app = new Hono()
   )
 
   // ===========================================================================
-  // 14. Submit Task for Guide Review
+  // 14. Submit Task Work for Guide Review
   // ===========================================================================
+  .post(
+    "/tasks/:taskId/submit-work",
+    sessionMiddleware,
+    zValidator("json", submitTaskWorkSchema),
+    async (c) => {
+      const user = c.get("user");
+      const databases = c.get("databases");
+      const { taskId } = c.req.param();
+      const { submissionNotes, submissionFileUrl } = c.req.valid("json");
+
+      const adminDatabases = getAdminDatabases("college:submit-task-work");
+
+      const task = await adminDatabases
+        .getDocument<Task>(DATABASE_ID, TASKS_ID, taskId)
+        .catch(() => null);
+
+      if (!task) return c.json({ error: "Task not found" }, 404);
+
+      const profile = await getMemberPermissionProfile(databases, task.workspaceId, user.$id);
+      if (!profile) return c.json({ error: "Unauthorized" }, 401);
+
+      const now = new Date().toISOString();
+      const updated = await adminDatabases.updateDocument<Task>(
+        DATABASE_ID,
+        TASKS_ID,
+        taskId,
+        {
+          status: TaskStatus.IN_REVIEW,
+          verification_status: "PENDING_GUIDE_REVIEW",
+          review_status: "READY_FOR_REVIEW",
+          submission_notes: submissionNotes,
+          submission_file_url: submissionFileUrl || null,
+          submitted_for_review_at: now,
+          updated_at: now,
+        }
+      );
+
+      return c.json({ data: updated });
+    }
+  )
+
   .post(
     "/tasks/:taskId/submit-review",
     sessionMiddleware,
@@ -1321,7 +3295,9 @@ const app = new Hono()
       const user = c.get("user");
       const databases = c.get("databases");
       const { taskId } = c.req.param();
-      const { notes } = c.req.valid("json");
+      const body = c.req.valid("json");
+      const notes = body.submissionNotes || body.notes;
+      const fileUrl = body.submissionFileUrl || body.fileUrl;
 
       const adminDatabases = getAdminDatabases("college:submit-task-review");
 
@@ -1334,6 +3310,7 @@ const app = new Hono()
       const profile = await getMemberPermissionProfile(databases, task.workspaceId, user.$id);
       if (!profile) return c.json({ error: "Unauthorized" }, 401);
 
+      const now = new Date().toISOString();
       const updated = await adminDatabases.updateDocument<Task>(
         DATABASE_ID,
         TASKS_ID,
@@ -1341,8 +3318,12 @@ const app = new Hono()
         {
           status: TaskStatus.IN_REVIEW,
           verification_status: "PENDING_GUIDE_REVIEW",
+          review_status: "READY_FOR_REVIEW",
+          submission_notes: notes || null,
+          submission_file_url: fileUrl || null,
+          submitted_for_review_at: now,
           guide_feedback: notes || null,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         }
       );
 
@@ -1390,7 +3371,7 @@ const app = new Hono()
         const guideMatch = await adminDatabases.listDocuments<TeamGuide>(
           DATABASE_ID,
           TEAM_GUIDES_ID,
-          [Query.equal("team_id", team.id), Query.contains("guide_member_id", [user.$id])]
+          [Query.equal("team_id", team.id), Query.contains("guide_member_id", [profile.id, user.$id])]
         );
         isAssignedGuide = guideMatch.documents.length > 0;
       }
@@ -1399,19 +3380,27 @@ const app = new Hono()
         return deny(c, "college:tasks.verify");
       }
 
+      const now = new Date().toISOString();
+      const isApproved = decision === "APPROVED" || decision === "APPROVE";
+
       const updates: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
+        updated_at: now,
         guide_feedback: feedback || null,
+        reviewer_feedback: feedback || null,
+        reviewed_at: now,
+        reviewed_by: profile.id,
       };
 
-      if (decision === "APPROVED") {
+      if (isApproved) {
         updates.status = TaskStatus.DONE;
         updates.verification_status = "APPROVED";
-        updates.verified_at = new Date().toISOString();
+        updates.review_status = "APPROVED";
+        updates.verified_at = now;
         updates.verified_by = user.$id;
       } else {
         updates.status = TaskStatus.IN_PROGRESS;
         updates.verification_status = "CHANGES_REQUESTED";
+        updates.review_status = "CHANGES_REQUESTED";
       }
 
       const updated = await adminDatabases.updateDocument<Task>(

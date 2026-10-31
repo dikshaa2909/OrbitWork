@@ -12,6 +12,7 @@ import {
   Loader2,
   Calendar,
   User,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -219,9 +220,16 @@ export const GuideVerificationQueue: React.FC<GuideVerificationQueueProps> = ({
                   <div className="flex items-center gap-1.5">
                     <Calendar className="size-3 text-muted-foreground/70" />
                     <span>
-                      Due: {format(new Date(task.due_date), "MMM d, yyyy")}
+                      Due: {task.due_date ? format(new Date(task.due_date), "MMM d, yyyy") : "No due date"}
                     </span>
                   </div>
+
+                  {task.submitted_for_review_at && (
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="size-3 text-muted-foreground/70" />
+                      <span>Submitted: {format(new Date(task.submitted_for_review_at), "MMM d, h:mm a")}</span>
+                    </div>
+                  )}
 
                   {task.guide_feedback && (
                     <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
@@ -232,6 +240,30 @@ export const GuideVerificationQueue: React.FC<GuideVerificationQueueProps> = ({
                     </div>
                   )}
                 </div>
+
+                {task.submission_notes && (
+                  <div className="p-2.5 rounded-lg bg-muted/40 border text-xs space-y-1 mt-1">
+                    <div className="font-semibold text-foreground flex items-center gap-1.5">
+                      <FileText className="size-3 text-primary" />
+                      Student Submission Notes:
+                    </div>
+                    <p className="text-muted-foreground whitespace-pre-wrap">{task.submission_notes}</p>
+                  </div>
+                )}
+
+                {task.submission_file_url && (
+                  <div className="pt-1">
+                    <a
+                      href={task.submission_file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-semibold bg-primary/10 px-2.5 py-1 rounded-md transition"
+                    >
+                      <ExternalLink className="size-3" />
+                      Inspect Work Proof / Deliverable
+                    </a>
+                  </div>
+                )}
               </div>
 
               {/* Actions */}

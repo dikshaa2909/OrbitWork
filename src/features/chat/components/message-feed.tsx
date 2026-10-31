@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { MemberAvatar } from "@/features/members/components/member-avatar";
 import { RichTextViewer } from "@/components/editor/rich-text-viewer";
 
@@ -62,17 +63,52 @@ const MessageRow = memo(({ msg, onOpenThread, onConvertToTask, onToggleReaction 
     [msg.reactions]
   );
 
+  const isGuide = msg.author_role === "FACULTY_GUIDE" || msg.author_role_label === "Faculty Guide";
+  const isLead = msg.author_role === "TEAM_LEAD" || msg.author_role_label === "Team Lead";
+  const isHod = msg.author_role === "HOD" || msg.author_role_label === "HOD" || msg.author_role_label === "HOD / Coordinator";
+  const isStudent = msg.author_role === "STUDENT" || msg.author_role_label === "Student";
+
+  const rawName = msg.author_name || "Teammate";
+  const displayName = useMemo(() => {
+    if (isGuide) {
+      return rawName.toLowerCase().startsWith("prof") ? rawName : `Prof. ${rawName}`;
+    }
+    if (isHod) {
+      return (rawName.toLowerCase().startsWith("dr") || rawName.toLowerCase().startsWith("prof"))
+        ? rawName
+        : `Dr./Prof. ${rawName}`;
+    }
+    return rawName;
+  }, [isGuide, isHod, rawName]);
+
   return (
     <div className="group flex items-start gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors relative">
       <MemberAvatar
-        name={msg.author_name || "Teammate"}
+        name={displayName}
         className="size-8 mt-0.5"
       />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-xs text-foreground truncate max-w-[200px]">
-            {msg.author_name || "Teammate"}
+            {displayName}
           </span>
+          {isGuide ? (
+            <Badge className="text-[9px] font-bold px-1.5 py-0 h-4 rounded-sm tracking-tight bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-200">
+              Faculty Guide
+            </Badge>
+          ) : isLead ? (
+            <Badge className="text-[9px] font-bold px-1.5 py-0 h-4 rounded-sm tracking-tight bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-200">
+              Team Lead
+            </Badge>
+          ) : isHod ? (
+            <Badge variant="destructive" className="text-[9px] font-bold px-1.5 py-0 h-4 rounded-sm tracking-tight bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200">
+              HOD
+            </Badge>
+          ) : isStudent ? (
+            <Badge variant="outline" className="text-[9px] font-medium px-1.5 py-0 h-4 rounded-sm tracking-tight text-muted-foreground border-border">
+              Student
+            </Badge>
+          ) : null}
           <span className="text-[10px] text-muted-foreground shrink-0">
             {formattedTime}
           </span>
@@ -203,22 +239,58 @@ export const MessageFeed: React.FC<MessageFeedProps> = ({
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
       {/* Top Channel Header */}
       <div className="h-14 border-b px-6 flex items-center justify-between shrink-0 bg-card">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="text-muted-foreground shrink-0">{headerIcon}</div>
-          <div className="min-w-0">
-            <h2 className="font-bold text-sm text-foreground flex items-center gap-2 truncate">
-              {channel.name}
-            </h2>
-            {channel.description && (
+        {channel.type === "DM" ? (
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              <MemberAvatar
+                name={channel.dm_partner?.name || channel.name || "Direct Message"}
+                className="size-8"
+              />
+              <span className="absolute bottom-0 right-0 size-2.5 rounded-full bg-emerald-500 ring-2 ring-card" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-bold text-sm text-foreground flex items-center gap-2 truncate">
+                {channel.dm_partner?.name || channel.name || "Direct Message"}
+                <Badge variant="outline" className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+                  Direct Message
+                </Badge>
+              </h2>
               <p className="text-[11px] text-muted-foreground truncate max-w-md">
-                {channel.description}
+                {channel.dm_partner?.email || "1-on-1 Conversation"}
               </p>
-            )}
+            </div>
           </div>
+        ) : (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="text-muted-foreground shrink-0">{headerIcon}</div>
+            <div className="min-w-0">
+              <h2 className="font-bold text-sm text-foreground flex items-center gap-2 truncate">
+                {channel.name}
+                {channel.team_id && (
+                  <Badge variant="secondary" className="text-[10px] font-semibold text-primary bg-primary/10">
+                    Academic Group
+                  </Badge>
+                )}
+              </h2>
+              {channel.description && (
+                <p className="text-[11px] text-muted-foreground truncate max-w-md">
+                  {channel.description}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          {channel.team_id && (
+            <span className="hidden sm:inline-block text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20">
+              Private Group & Guide Chat
+            </span>
+          )}
+          <span className="text-xs uppercase font-semibold text-muted-foreground px-2 py-0.5 rounded bg-muted shrink-0">
+            {channel.type}
+          </span>
         </div>
-        <span className="text-xs uppercase font-semibold text-muted-foreground px-2 py-0.5 rounded bg-muted shrink-0">
-          {channel.type}
-        </span>
       </div>
 
       {/* Message List */}
@@ -230,9 +302,17 @@ export const MessageFeed: React.FC<MessageFeedProps> = ({
         ) : messages.length === 0 ? (
           <div className="p-12 text-center text-xs text-muted-foreground">
             <p className="font-semibold text-sm text-foreground mb-1">
-              Welcome to #{channel.name}!
+              {channel.type === "DM"
+                ? `Direct Message with ${channel.name}`
+                : `Welcome to #${channel.name}!`}
             </p>
-            <p>This is the start of the #{channel.name} channel.</p>
+            <p>
+              {channel.type === "DM"
+                ? "This is the beginning of your private 1-on-1 direct message history."
+                : channel.team_id
+                ? "This is the private discussion channel for your capstone project group. Only assigned group students and your Faculty Guide have access."
+                : `This is the start of the #${channel.name} channel.`}
+            </p>
           </div>
         ) : (
           messages.map((msg) => (

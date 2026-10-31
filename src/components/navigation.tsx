@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   SettingsIcon,
   UsersIcon,
@@ -10,13 +10,14 @@ import {
   Key,
   MessageSquare,
   GraduationCap,
-  Award,
+  Clock,
 } from "lucide-react";
 import { GoCheckCircle, GoCheckCircleFill, GoHome, GoHomeFill } from "react-icons/go";
 
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
+import { useCollegePersona } from "@/features/college/hooks/use-college-persona";
 
 import { cn } from "@/lib/utils";
 
@@ -31,32 +32,48 @@ interface RouteItem {
 export const Navigation = () => {
   const workspaceId = useWorkspaceId();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { data: workspace } = useGetWorkspace({ workspaceId });
   const { canEditWorkspace, can } = usePermissions(workspaceId);
   const canManageRoles = can("roles:manage") || canEditWorkspace;
 
   const isCollege = workspace?.type === "COLLEGE";
+  const { isHod, isGuide, isTeamLead, isStudent } = useCollegePersona(workspaceId);
 
-  // Dynamic routes based on workspace archetype
-  const activeRoutes: RouteItem[] = isCollege
-    ? [
+  // Dynamic routes based on workspace archetype & academic persona
+  let activeRoutes: RouteItem[] = [];
+
+  if (isCollege) {
+    if (isStudent || isTeamLead) {
+      // Students and Student Team Leads: dedicated workspace & team chat
+      activeRoutes = [
         {
-          label: "Dashboard",
+          label: "My Project Workspace",
           href: "",
           icon: GoHome,
           activeIcon: GoHomeFill,
         },
         {
-          label: "Batches & Teams",
-          href: "/college",
-          icon: GraduationCap as unknown as typeof GoHome,
-          activeIcon: GraduationCap as unknown as typeof GoHomeFill,
+          label: "Group Chat",
+          href: "/chat",
+          icon: MessageSquare as unknown as typeof GoHome,
+          activeIcon: MessageSquare as unknown as typeof GoHomeFill,
+        },
+      ];
+    } else if (isGuide && !isHod) {
+      // Faculty Guides: My Guided Groups, Reviews & Approvals, Team Chat
+      activeRoutes = [
+        {
+          label: "My Guided Groups",
+          href: "",
+          icon: GoHome,
+          activeIcon: GoHomeFill,
         },
         {
-          label: "Milestones & Reviews",
-          href: "/college?tab=milestones",
-          icon: Award as unknown as typeof GoHome,
-          activeIcon: Award as unknown as typeof GoHomeFill,
+          label: "Reviews & Approvals",
+          href: "/college",
+          icon: Clock as unknown as typeof GoHome,
+          activeIcon: Clock as unknown as typeof GoHomeFill,
         },
         {
           label: "Team Chat",
@@ -64,24 +81,33 @@ export const Navigation = () => {
           icon: MessageSquare as unknown as typeof GoHome,
           activeIcon: MessageSquare as unknown as typeof GoHomeFill,
         },
+      ];
+    } else {
+      // HOD / Department Coordinator: Unified Academics Hub, Faculty Directory, Announcements & Settings
+      activeRoutes = [
         {
-          label: "Members & Guides",
+          label: "Dashboard",
+          href: "",
+          icon: GoHome,
+          activeIcon: GoHomeFill,
+        },
+        {
+          label: "Academics Hub",
+          href: "/college",
+          icon: GraduationCap as unknown as typeof GoHome,
+          activeIcon: GraduationCap as unknown as typeof GoHomeFill,
+        },
+        {
+          label: "Faculty Directory",
           href: "/members",
           icon: UsersIcon as unknown as typeof GoHome,
           activeIcon: UsersIcon as unknown as typeof GoHomeFill,
         },
         {
-          label: "Roles & Permissions",
-          href: "/settings/roles",
-          icon: ShieldCheck as unknown as typeof GoHome,
-          activeIcon: ShieldCheck as unknown as typeof GoHomeFill,
-          permission: "manage_roles",
-        },
-        {
-          label: "Access Requests",
-          href: "/requests",
-          icon: Key as unknown as typeof GoHome,
-          activeIcon: Key as unknown as typeof GoHomeFill,
+          label: "Announcements & Chat",
+          href: "/chat",
+          icon: MessageSquare as unknown as typeof GoHome,
+          activeIcon: MessageSquare as unknown as typeof GoHomeFill,
         },
         {
           label: "Settings",
@@ -90,10 +116,12 @@ export const Navigation = () => {
           activeIcon: SettingsIcon as unknown as typeof GoHomeFill,
           permission: "edit_workspace",
         },
-      ]
-    : [
-        {
-          label: "Home",
+      ];
+    }
+  } else {
+    activeRoutes = [
+      {
+        label: "Home",
           href: "",
           icon: GoHome,
           activeIcon: GoHomeFill,
@@ -143,6 +171,7 @@ export const Navigation = () => {
           permission: "edit_workspace",
         },
       ];
+  }
 
   const filteredRoutes = activeRoutes.filter((item) => {
     if (item.permission === "edit_workspace") {
@@ -158,14 +187,22 @@ export const Navigation = () => {
     <ul className="flex flex-col">
       {filteredRoutes.map((item) => {
         const fullHref = `/workspaces/${workspaceId}${item.href}`;
-        const basePath = item.href.split("?")[0];
+        const hasQuery = item.href.includes("?");
+        const [basePath, queryString] = item.href.split("?");
         const fullBasePath = `/workspaces/${workspaceId}${basePath}`;
 
-        const isActive =
-          item.href === ""
-            ? pathname === fullHref
-            : pathname === fullBasePath ||
-              pathname.startsWith(`${fullBasePath}/`);
+        let isActive = false;
+        if (item.href === "") {
+          isActive = pathname === fullHref;
+        } else if (hasQuery) {
+          const itemTab = new URLSearchParams(queryString).get("tab");
+          isActive = pathname === fullBasePath && searchParams?.get("tab") === itemTab;
+        } else {
+          const currentTab = searchParams?.get("tab");
+          isActive =
+            pathname === fullBasePath &&
+            (!currentTab || currentTab === "overview" || currentTab === "teams");
+        }
 
         const Icon = isActive ? item.activeIcon : item.icon;
         

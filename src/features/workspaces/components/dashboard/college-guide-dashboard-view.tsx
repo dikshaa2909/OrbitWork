@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   GraduationCap,
   Users,
@@ -10,9 +11,11 @@ import {
   MessageSquare,
   Plus,
   ArrowRight,
-  ExternalLink,
-  FileCheck2,
-  AlertCircle,
+  Copy,
+  Check,
+  Crown,
+  KeyRound,
+  ShieldAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +23,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DottedSeparator } from "@/components/dotted-separator";
 import { EmptyState } from "@/components/empty-state";
+import { StatCard } from "@/features/college/components/stat-card";
+import { StudentRosterList } from "@/features/college/components/student-roster-list";
 import {
   Dialog,
   DialogContent,
@@ -30,11 +35,16 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { InviteGroupStudentsDialog } from "@/features/college/components/invite-group-students-dialog";
 
-import { useGetGuideGroups } from "@/features/college/api/use-get-guide-groups";
+import { CreateGroupModal } from "@/features/college/components/create-group-modal";
+import { InviteGroupStudentsDialog } from "@/features/college/components/invite-group-students-dialog";
+import { useCurrentMember } from "@/features/members/api/use-current-member";
+import { useGetGuideDashboard } from "@/features/college/api/use-get-guide-dashboard";
 import { useGetPendingTasks } from "@/features/college/api/use-get-pending-tasks";
+import { useGetGuideSubmissions } from "@/features/college/api/use-get-guide-submissions";
 import { useVerifyTask } from "@/features/college/api/use-verify-task";
+import { useUpdateTeamMemberRole } from "@/features/college/api/use-update-team-member-role";
+import { useRemoveTeamMember } from "@/features/college/api/use-remove-team-member";
 import { Workspace } from "@/features/workspaces/types";
 import { AcademicTeam, GuideTaskVerificationItem } from "@/features/college/types";
 
@@ -47,19 +57,73 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
 }) => {
   const workspaceId = workspace.$id || workspace.id;
 
+  // Modals state
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [selectedTeamForInvite, setSelectedTeamForInvite] = useState<AcademicTeam | null>(null);
   const [activeTaskForChanges, setActiveTaskForChanges] = useState<GuideTaskVerificationItem | null>(null);
   const [changesFeedback, setChangesFeedback] = useState("");
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  const { data: groups = [] } = useGetGuideGroups({
-    workspaceId,
-  });
+  // Remove confirmation state
+  const [memberToRemove, setMemberToRemove] = useState<{
+    teamId: string;
+    memberId: string;
+    studentName: string;
+  } | null>(null);
 
-  const { data: pendingTasks = [] } = useGetPendingTasks({
-    workspaceId,
-  });
+  // Queries & Mutations
+  const { data: currentMember } = useCurrentMember({ workspaceId });
+  const { data: dashboardData, isLoading } = useGetGuideDashboard({ workspaceId });
+  const { data: pendingTasks = [] } = useGetPendingTasks({ workspaceId });
+  const { data: guideSubmissions = [] } = useGetGuideSubmissions({ workspaceId });
+
+  const pendingMilestonesCount = guideSubmissions.filter((s) => s.status === "SUBMITTED").length;
 
   const { mutate: verifyTask, isPending: isVerifying } = useVerifyTask();
+  const { mutate: updateRole } = useUpdateTeamMemberRole();
+  const { mutate: removeMember, isPending: isRemovingMember } = useRemoveTeamMember();
+
+  const groups = dashboardData?.groups || [];
+  const batches = dashboardData?.batches || [];
+  const totalStudents = dashboardData?.totalStudents || 0;
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    toast.success("Student join code copied!");
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  const handleSetTeamLead = (teamId: string, memberId: string) => {
+    updateRole({
+      param: { teamId, memberId },
+      json: { role: "LEAD" },
+    });
+  };
+
+  const handleDemoteLead = (teamId: string, memberId: string) => {
+    updateRole({
+      param: { teamId, memberId },
+      json: { role: "MEMBER" },
+    });
+  };
+
+  const handleConfirmRemove = () => {
+    if (!memberToRemove) return;
+    removeMember(
+      {
+        param: {
+          teamId: memberToRemove.teamId,
+          memberId: memberToRemove.memberId,
+        },
+      },
+      {
+        onSuccess: () => {
+          setMemberToRemove(null);
+        },
+      }
+    );
+  };
 
   const handleApprove = (taskId: string) => {
     verifyTask({
@@ -93,175 +157,350 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Top Banner: Faculty Guide Profile */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-emerald-900/10 via-teal-900/10 to-transparent border border-border">
+      {/* ── Modal: Create Group Modal (Faculty Self-Service) ── */}
+      <CreateGroupModal
+        isOpen={isCreateGroupOpen}
+        onClose={() => setIsCreateGroupOpen(false)}
+        workspaceId={workspaceId}
+        batches={batches}
+      />
+
+      {/* ── Modal: Invite Group Students Dialog ── */}
+      {selectedTeamForInvite && (
+        <InviteGroupStudentsDialog
+          isOpen={!!selectedTeamForInvite}
+          onClose={() => setSelectedTeamForInvite(null)}
+          workspaceId={workspaceId}
+          teamId={selectedTeamForInvite.id}
+          teamCode={selectedTeamForInvite.team_code}
+          teamTitle={selectedTeamForInvite.title}
+          batchId={selectedTeamForInvite.batch_id}
+        />
+      )}
+
+      {/* ── Modal: Confirm Remove Student ── */}
+      {memberToRemove && (
+        <Dialog open={!!memberToRemove} onOpenChange={() => setMemberToRemove(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <div className="flex items-center gap-2 text-rose-600">
+                <ShieldAlert className="size-5" />
+                <DialogTitle className="text-base font-bold">
+                  Remove Student from Group
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-xs pt-1">
+                Are you sure you want to remove <strong>{memberToRemove.studentName}</strong> from this project group? Their group tasks and chat permissions will be revoked.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMemberToRemove(null)}
+                disabled={isRemovingMember}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleConfirmRemove}
+                disabled={isRemovingMember}
+                className="font-semibold"
+              >
+                {isRemovingMember ? "Removing..." : "Remove Student"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Modal: Send Remarks for Changes ── */}
+      {activeTaskForChanges && (
+        <Dialog open={!!activeTaskForChanges} onOpenChange={() => setActiveTaskForChanges(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <Clock className="size-5 text-amber-500" />
+                <DialogTitle className="text-base font-bold">
+                  Request Task Changes
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-xs">
+                Provide feedback for <strong>{activeTaskForChanges.name}</strong>. The student will be notified to revise and re-submit.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2 pt-2">
+              <Label className="text-xs font-semibold">Faculty Guide Remarks / Guidance</Label>
+              <Textarea
+                value={changesFeedback}
+                onChange={(e) => setChangesFeedback(e.target.value)}
+                placeholder="e.g. Please update the API sequence diagram and re-run calibration benchmarks before sign-off..."
+                rows={4}
+                className="text-xs resize-none"
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setActiveTaskForChanges(null)}
+                disabled={isVerifying}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSendRemarks}
+                disabled={isVerifying || !changesFeedback.trim()}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+              >
+                {isVerifying ? "Sending..." : "Send Remarks"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── 1. Top Banner: Faculty Guide Profile & Primary "Create Project Group" Action ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-transparent border border-border">
         <div>
           <div className="flex items-center gap-2">
-            <span className="p-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <span className="p-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
               <GraduationCap className="size-5" />
             </span>
             <h1 className="text-xl font-bold tracking-tight text-foreground">
-              Faculty Portal — My Assigned Groups
+              {currentMember?.name
+                ? `Welcome, Prof. ${currentMember.name.replace(/^Prof\.?\s*/i, "")}`
+                : "Faculty Portal — My Assigned Groups"}
             </h1>
             <Badge variant="secondary" className="text-[10px] font-bold">
-              FACULTY PROJECT GUIDE
+              FACULTY GUIDE
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Supervise capstone groups, verify student milestone deliverables, and issue group join codes.
+            Supervise student teams and verify deliverables.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button size="sm" asChild className="gap-1.5 shadow-sm bg-primary text-primary-foreground">
-            <Link href={`/workspaces/${workspaceId}/college?tab=teams`}>
+        {/* Primary Faculty Action: Exactly One Primary CTA */}
+        {groups.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setIsCreateGroupOpen(true)}
+              className="gap-1.5 shadow-md bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold h-9 px-4"
+            >
               <Plus className="size-4" />
-              + Create New Project Group
-            </Link>
-          </Button>
-
-          <Button size="sm" variant="outline" asChild>
-            <Link href={`/workspaces/${workspaceId}/college?tab=verify`}>
-              Verification Queue ({pendingTasks.length})
-              <ArrowRight className="size-3.5 ml-1.5" />
-            </Link>
-          </Button>
-        </div>
+              Create Project Group
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Guide Personal Stats */}
+      {/* ── 2. Guide Key Metric Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* My Groups */}
-        <div className="p-4 rounded-xl border bg-card shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase font-bold text-muted-foreground tracking-wider">
-              My Groups
-            </p>
-            <p className="text-2xl font-extrabold text-foreground mt-1">
-              {groups.length} Groups
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Assigned for supervision
-            </p>
-          </div>
-          <div className="size-10 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-            <Users className="size-5" />
-          </div>
-        </div>
-
-        {/* Tasks Awaiting Review */}
-        <div className="p-4 rounded-xl border bg-card shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase font-bold text-muted-foreground tracking-wider">
-              Tasks Awaiting Review
-            </p>
-            <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400 mt-1">
-              {pendingTasks.length} Tasks
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Action required from guide
-            </p>
-          </div>
-          <div className="size-10 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-            <Clock className="size-5" />
-          </div>
-        </div>
-
-        {/* Reports Pending Sign-Off */}
-        <div className="p-4 rounded-xl border bg-card shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase font-bold text-muted-foreground tracking-wider">
-              Reports Pending Sign-Off
-            </p>
-            <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-              Active
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Milestone rubrics ready
-            </p>
-          </div>
-          <div className="size-10 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-            <FileCheck2 className="size-5" />
-          </div>
-        </div>
+        <StatCard
+          label="My Groups"
+          value={`${groups.length} Groups`}
+          subValue="Active project supervision"
+          icon={GraduationCap}
+          iconClassName="bg-purple-500/10 text-purple-600 dark:text-purple-400"
+        />
+        <StatCard
+          label="Tasks Waiting for Review"
+          value={`${pendingTasks.length} Tasks`}
+          subValue="Student submissions in review"
+          icon={Clock}
+          iconClassName="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        />
+        <StatCard
+          label="Reports Pending Sign-Off"
+          value={`${pendingMilestonesCount} Reports`}
+          subValue="Milestone deliverables"
+          icon={CheckCircle2}
+          iconClassName="bg-blue-500/10 text-blue-600 dark:text-blue-400"
+        />
       </div>
 
-      {/* Guided Groups Roster & Join Code Generation */}
+      {/* ── 3. Guided Groups Roster, Student Join Codes & Student Management ── */}
       <div className="bg-card border border-border rounded-xl p-5 text-card-foreground space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="text-base font-bold text-foreground">
-              My Groups ({groups.length})
+              My Groups & Student Teams ({groups.length} Groups • {totalStudents} Students)
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Generate group-scoped student join codes so students land directly in their assigned teams.
+              Manage student group rosters, assign team leads, and share group join codes.
             </p>
           </div>
         </div>
 
         <DottedSeparator />
 
-        {groups.length === 0 ? (
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="h-44 rounded-xl bg-muted animate-pulse" />
+            <div className="h-44 rounded-xl bg-muted animate-pulse" />
+          </div>
+        ) : groups.length === 0 ? (
           <EmptyState
             icon={Users}
-            title="No project groups assigned yet"
-            description="Your Department Head (HOD) will allocate student capstone groups to you for mentorship."
+            title="No project groups created yet"
+            description="Click below to create your first project group and generate a student invite code."
+            actionLabel="+ Create Project Group"
+            onAction={() => setIsCreateGroupOpen(true)}
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {groups.map((team) => (
-              <Card key={team.id} className="shadow-none border rounded-xl overflow-hidden hover:border-primary/40 transition-colors">
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-muted">
-                        {team.team_code}
-                      </span>
-                      <h4 className="text-sm font-semibold text-foreground mt-1 line-clamp-1">
-                        {team.title}
-                      </h4>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {groups.map((group) => {
+              const leadStudent = group.roster.find((m) => m.role === "LEAD" || m.memberId === group.lead_member_id);
+
+              return (
+                <Card
+                  key={group.id}
+                  className="shadow-xs border rounded-2xl overflow-hidden hover:border-primary/50 transition-all flex flex-col justify-between"
+                >
+                  <CardContent className="p-5 space-y-4">
+                    {/* Header: Team Code & Title */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-extrabold text-xs px-2.5 py-1 rounded-md bg-purple-600 text-white">
+                            {group.team_code}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground font-mono">
+                            {group.batch_name}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-foreground mt-1.5 leading-snug">
+                          {group.title}
+                        </h3>
+                      </div>
+
+                      {/* Join Code Badge with One-Click Copy */}
+                      <div className="flex flex-col items-end">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
+                          Student Join Code
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCode(group.student_join_code)}
+                          title="Click to copy join code"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/20 text-primary font-mono text-xs font-black tracking-wider transition-colors"
+                        >
+                          <KeyRound className="size-3.5" />
+                          <span>{group.student_join_code}</span>
+                          {copiedCode === group.student_join_code ? (
+                            <Check className="size-3 text-emerald-500 ml-1" />
+                          ) : (
+                            <Copy className="size-3 opacity-60 ml-1" />
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    {team.project_id && (
-                      <Button size="sm" variant="ghost" className="h-7 text-xs" asChild>
-                        <Link href={`/workspaces/${workspaceId}/projects/${team.project_id}`}>
-                          Review Tasks →
+
+                    {group.abstract && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {group.abstract}
+                      </p>
+                    )}
+
+                    {/* Student Roster & Promotion Section */}
+                    <div className="space-y-2 pt-2 border-t">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                          <Users className="size-3.5 text-muted-foreground" />
+                          Student Roster ({group.roster.length}):
+                        </span>
+                        {leadStudent && (
+                          <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1">
+                            <Crown className="size-3" />
+                            Lead: {leadStudent.name}
+                          </span>
+                        )}
+                      </div>
+
+                      <StudentRosterList
+                        teamId={group.id}
+                        members={group.roster.map((r) => ({
+                          id: r.id,
+                          team_id: group.id,
+                          member_id: r.memberId,
+                          name: r.name,
+                          email: r.email,
+                          role: r.role === "LEAD" || r.memberId === group.lead_member_id ? "LEAD" : "MEMBER",
+                          joined_at: new Date().toISOString(),
+                        }))}
+                        canManage={true}
+                        onToggleLead={(tId, mId, currentRole) => {
+                          if (currentRole === "LEAD") {
+                            handleDemoteLead(tId, mId);
+                          } else {
+                            handleSetTeamLead(tId, mId);
+                          }
+                        }}
+                        onRemoveStudent={(tId, mId) => {
+                          const s = group.roster.find((mem) => mem.memberId === mId);
+                          setMemberToRemove({
+                            teamId: tId,
+                            memberId: mId,
+                            studentName: s?.name || "Student",
+                          });
+                        }}
+                        emptyMessage={`No students enrolled yet. Share code ${group.student_join_code} with your students to self-join.`}
+                      />
+                    </div>
+
+                    {/* Bottom Action Bar */}
+                    <div className="pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setSelectedTeamForInvite({
+                            id: group.id,
+                            team_code: group.team_code,
+                            title: group.title,
+                            batch_id: group.batch_id,
+                          } as AcademicTeam)
+                        }
+                        className="text-xs h-8 gap-1.5"
+                      >
+                        <Plus className="size-3.5" />
+                        Invite Students
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="text-xs h-8 gap-1.5 font-medium"
+                        asChild
+                      >
+                        <Link
+                          href={
+                            group.channel_id
+                              ? `/workspaces/${workspaceId}/chat?channelId=${group.channel_id}`
+                              : `/workspaces/${workspaceId}/chat`
+                          }
+                        >
+                          <MessageSquare className="size-3.5" />
+                          Open Group Chat
                         </Link>
                       </Button>
-                    )}
-                  </div>
-
-                  {team.abstract && (
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {team.abstract}
-                    </p>
-                  )}
-
-                  <div className="pt-2 border-t flex items-center justify-between gap-2 flex-wrap">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setSelectedTeamForInvite(team)}
-                      className="text-xs h-8 gap-1.5"
-                    >
-                      <Plus className="size-3.5" />
-                      Generate Student Invite Code
-                    </Button>
-
-                    <Button size="sm" variant="secondary" className="text-xs h-8 gap-1.5" asChild>
-                      <Link href={`/workspaces/${workspaceId}/chat`}>
-                        <MessageSquare className="size-3.5" />
-                        Open Group Chat
-                      </Link>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Task Verification Action Queue */}
+      {/* ── 4. Task Verification Action Queue ── */}
       <div className="bg-card border border-border rounded-xl p-5 text-card-foreground space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -269,14 +508,14 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
               Verification Queue ({pendingTasks.length} Deliverables in Review)
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Tasks moved to Review by your students awaiting faculty sign-off into Done.
+              Tasks moved to Review by your student groups awaiting faculty sign-off into Done.
             </p>
           </div>
 
           <Button variant="outline" size="sm" asChild>
             <Link href={`/workspaces/${workspaceId}/college?tab=verify`}>
               Open Full Queue
-              <ExternalLink className="size-3.5 ml-1.5" />
+              <ArrowRight className="size-3.5 ml-1.5" />
             </Link>
           </Button>
         </div>
@@ -294,38 +533,44 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
             {pendingTasks.map((task) => (
               <div
                 key={task.id}
-                className="p-3.5 rounded-lg border bg-background flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+                className="p-3.5 rounded-xl border bg-background flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-muted">
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                       {task.team_code}
                     </span>
-                    <h4 className="text-sm font-semibold text-foreground">
+                    <h4 className="font-semibold text-sm text-foreground">
                       {task.name}
                     </h4>
+                    <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-500/30">
+                      In Review
+                    </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Group: {task.team_title} • Submitted by: {task.assignee_name || "Student Member"}
+                    Project Group: <strong>{task.team_title || "Academic Project"}</strong>
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 self-end sm:self-center">
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={() => {
+                      setActiveTaskForChanges(task);
+                      setChangesFeedback("");
+                    }}
                     disabled={isVerifying}
-                    onClick={() => setActiveTaskForChanges(task)}
-                    className="h-8 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
+                    className="h-8 text-xs border-amber-500/30 text-amber-600 hover:bg-amber-500/10"
                   >
-                    Send Remarks for Changes
+                    Send Remarks
                   </Button>
+
                   <Button
                     size="sm"
-                    variant="primary"
-                    disabled={isVerifying}
                     onClick={() => handleApprove(task.id)}
-                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                    disabled={isVerifying}
+                    className="h-8 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
                   >
                     <CheckCircle2 className="size-3.5" />
                     Sign Off & Mark Done
@@ -336,79 +581,6 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
           </div>
         )}
       </div>
-
-      {/* Modal for student team join code */}
-      {selectedTeamForInvite && (
-        <InviteGroupStudentsDialog
-          isOpen={!!selectedTeamForInvite}
-          onClose={() => setSelectedTeamForInvite(null)}
-          workspaceId={workspaceId}
-          teamId={selectedTeamForInvite.id}
-          teamCode={selectedTeamForInvite.team_code}
-          teamTitle={selectedTeamForInvite.title}
-          batchId={selectedTeamForInvite.batch_id}
-        />
-      )}
-
-      {/* Remarks Dialog */}
-      <Dialog
-        open={!!activeTaskForChanges}
-        onOpenChange={(open) => {
-          if (!open) {
-            setActiveTaskForChanges(null);
-            setChangesFeedback("");
-          }
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-2">
-              <AlertCircle className="size-5 text-destructive" />
-              <DialogTitle className="text-base font-bold">
-                Send Remarks for Changes
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-xs">
-              Provide constructive feedback for {activeTaskForChanges?.name}. The task will return to In Progress for the students to revise.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2 py-2">
-            <Label htmlFor="guide-remarks" className="text-xs font-medium">
-              Faculty Remarks / Feedback *
-            </Label>
-            <Textarea
-              id="guide-remarks"
-              rows={4}
-              value={changesFeedback}
-              onChange={(e) => setChangesFeedback(e.target.value)}
-              placeholder="Specify required corrections (e.g. Include circuit diagram in Section 3 and update test results)..."
-              className="text-xs"
-            />
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setActiveTaskForChanges(null);
-                setChangesFeedback("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={isVerifying || !changesFeedback.trim()}
-              onClick={handleSendRemarks}
-            >
-              Send Remarks to Group
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

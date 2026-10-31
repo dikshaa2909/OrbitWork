@@ -102,12 +102,26 @@ export function usePermissions(
   const role: MemberRole | undefined = useMemo(() => {
     if (isSystemRole && roleLevel === 0) return MemberRole.OWNER;
     if (roleLevel === 10) return MemberRole.ADMIN;
-    if (roleLevel === 30) return MemberRole.PROJECT_MANAGER;
-    if (roleLevel === 80) return MemberRole.VIEWER;
-    if (roleLevel === 90) return MemberRole.GUEST;
-    if (member?.role) return member.role as MemberRole;
+    if (
+      roleLevel === 20 ||
+      effectiveData?.role?.name?.toLowerCase().includes("project manager") ||
+      effectiveData?.role?.name?.toLowerCase().includes("faculty") ||
+      effectiveData?.role?.name?.toLowerCase().includes("guide")
+    )
+      return MemberRole.PROJECT_MANAGER;
+    if (roleLevel === 30 || effectiveData?.role?.name?.toLowerCase().includes("member")) {
+      return MemberRole.MEMBER;
+    }
+    if (roleLevel === 40 || roleLevel === 80) return MemberRole.VIEWER;
+    if (roleLevel === 50 || roleLevel === 90) return MemberRole.GUEST;
+    if (member?.role) {
+      if (member.role === "PROJECT_MANAGER" || (member.role as string) === "FACULTY_GUIDE") {
+        return MemberRole.PROJECT_MANAGER;
+      }
+      return member.role as MemberRole;
+    }
     return MemberRole.MEMBER;
-  }, [roleLevel, isSystemRole, member?.role]);
+  }, [roleLevel, isSystemRole, member?.role, effectiveData?.role?.name]);
 
   const can = useMemo(() => {
     return (actionOrKey: string, context?: PermissionContext): boolean => {

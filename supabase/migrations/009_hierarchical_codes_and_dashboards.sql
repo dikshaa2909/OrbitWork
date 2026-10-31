@@ -71,7 +71,7 @@ BEGIN
     WHERE "workspaceId" = v_link."workspaceId"
       AND (name ILIKE '%Project Manager%' OR name ILIKE '%Faculty%' OR level = 30)
     LIMIT 1;
-    v_assigned_role := 'MEMBER';
+    v_assigned_role := 'PROJECT_MANAGER';
   ELSIF v_link.target_role = 'STUDENT_LEAD' THEN
     SELECT id INTO v_assigned_role_id
     FROM public.roles

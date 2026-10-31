@@ -377,4 +377,42 @@ test("Engine: College hierarchy permissions respect roles (HOD & Guides vs Stude
   assert.equal(can(devMember, "college:submissions.submit"), true);
 });
 
+// 19. Team Lead Promotion & Group Management
+test("Engine: Team Lead permissions unlock task creation, assignment, and group leadership", () => {
+  const teamLeadMember: MemberPermissionProfile = {
+    id: "student-lead-1",
+    workspaceId: "ws-college",
+    userId: "user-student-lead",
+    role: {
+      name: "Team Lead",
+      level: HIERARCHY_LEVELS.TEAM_LEAD,
+      isSystem: false,
+      color: "#0891b2",
+      permissions: [
+        "members:view",
+        "tasks:create",
+        "tasks:view.all",
+        "tasks:edit.any",
+        "tasks:assign",
+        "tasks:transition",
+        "college:groups.lead",
+        "college:submissions.submit",
+      ],
+    },
+    isWorkspaceOwner: false,
+  };
+
+  // Team Lead has unlocked group task creation and teammate assignment
+  assert.equal(can(teamLeadMember, "tasks:create"), true);
+  assert.equal(can(teamLeadMember, "tasks:assign"), true);
+  assert.equal(can(teamLeadMember, "tasks:transition"), true);
+  assert.equal(can(teamLeadMember, "college:groups.lead"), true);
+  assert.equal(can(teamLeadMember, "college:submissions.submit"), true);
+
+  // But Team Lead CANNOT verify their own or teammates' tasks (only Faculty Guide / HOD can)
+  assert.equal(can(teamLeadMember, "college:tasks.verify"), false);
+  assert.equal(can(teamLeadMember, "college:batches.manage"), false);
+});
+
+
 

@@ -98,6 +98,11 @@ export type Task = DocumentModel & {
   sprintId?: string | null;
   verification_status?: TaskVerificationStatus;
   guide_feedback?: string | null;
+  submission_notes?: string | null;
+  submission_file_url?: string | null;
+  submitted_for_review_at?: string | null;
+  review_status?: "TODO" | "IN_PROGRESS" | "READY_FOR_REVIEW" | "CHANGES_REQUESTED" | "APPROVED";
+  reviewer_feedback?: string | null;
   verified_at?: string | null;
   verified_by?: string | null;
   verified_by_member?: Member | null;
