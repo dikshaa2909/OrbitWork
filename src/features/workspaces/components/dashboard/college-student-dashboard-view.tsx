@@ -314,13 +314,6 @@ export const CollegeStudentDashboardView: React.FC<CollegeStudentDashboardViewPr
                 New Group Task
               </Button>
             )}
-            {team.project_id && (
-              <Button variant="outline" size="sm" className="text-xs h-8" asChild>
-                <Link href={`/workspaces/${workspaceId}/projects/${team.project_id}`}>
-                  Full Kanban Board →
-                </Link>
-              </Button>
-            )}
           </div>
         </div>
 

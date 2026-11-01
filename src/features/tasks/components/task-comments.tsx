@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/features/members/components/member-avatar";
 import { DottedSeparator } from "@/components/dotted-separator";
 import { RichTextViewer } from "@/components/editor/rich-text-viewer";
+import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
+import { useCollegePersona } from "@/features/college/hooks/use-college-persona";
 
 const RichTextEditor = dynamic(
   () =>
@@ -36,9 +39,23 @@ interface TaskCommentsProps {
 
 export const TaskComments = ({ taskId }: TaskCommentsProps) => {
   const [content, setContent] = useState("");
-  const { can, role } = usePermissions();
+  const workspaceId = useWorkspaceId();
+  const { data: workspace } = useGetWorkspace({ workspaceId });
+  const { can, canComment: canCommentFromPerms, role } = usePermissions(workspaceId);
+  const { isHod, isGuide, isStudent, isTeamLead } = useCollegePersona(workspaceId);
   const { data, isLoading } = useGetComments({ taskId });
   const { mutate: createComment, isPending } = useCreateComment();
+
+  const isCollege = workspace?.type === "COLLEGE";
+  const isCollegeMember = isCollege && (isGuide || isHod || isStudent || isTeamLead);
+
+  // Faculty Guide, HOD, Lead, Student or anyone with comment permission can write comments
+  const canComment =
+    canCommentFromPerms ||
+    can("comments:create") ||
+    can("tasks:comments.create") ||
+    can("comment") ||
+    isCollegeMember;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,7 +85,7 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
       <DottedSeparator className="my-4" />
 
       {/* Comment Input with Rich Text Editor */}
-      {can("comment") ? (
+      {canComment ? (
         <form onSubmit={handleSubmit} className="flex flex-col gap-y-3 mb-6">
           <RichTextEditor
             placeholder="Add a comment or type '@' to mention a teammate..."
@@ -100,7 +117,7 @@ export const TaskComments = ({ taskId }: TaskCommentsProps) => {
         <p className="text-sm text-muted-foreground">Loading comments...</p>
       ) : comments.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4 text-center">
-          {can("comment")
+          {canComment
             ? "No comments yet. Start the conversation!"
             : "No comments on this task yet."}
         </p>

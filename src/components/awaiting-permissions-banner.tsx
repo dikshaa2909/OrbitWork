@@ -15,20 +15,31 @@ interface AwaitingPermissionsBannerProps {
 export const AwaitingPermissionsBanner: React.FC<AwaitingPermissionsBannerProps> = ({
   workspaceId,
 }) => {
-  const { data: workspace } = useGetWorkspace({ workspaceId });
-  const { isHod, isGuide, isStudent, isTeamLead } = useCollegePersona(workspaceId);
+  const { data: workspace, isLoading: isWorkspaceLoading } = useGetWorkspace({ workspaceId });
+  const { isHod, isGuide, isStudent, isTeamLead, isLoading: isPersonaLoading } = useCollegePersona(workspaceId);
   const { isOwner, isAdmin, isPM, canCreateTask, canCreateProject, isLoading, role } =
     usePermissions(workspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
-  // In College workspaces, structured academic roles govern actions - do NOT show corporate view-only banner
-  if (workspace?.type === "COLLEGE" || isHod || isGuide || isStudent || isTeamLead) {
+  // Barrier: While any context queries are settling, do not render banner to prevent flash
+  if (isWorkspaceLoading || isPersonaLoading || isLoading || dismissed) {
     return null;
   }
 
-  // If loading or dismissed or user already has significant powers (owner, admin, PM, can create tasks)
-  if (isLoading || dismissed) return null;
+  // In College workspaces, structured academic roles govern actions - do NOT show corporate view-only banner
+  if (
+    workspace?.type === "COLLEGE" ||
+    (workspace as unknown as { archetype?: string })?.archetype === "COLLEGE" ||
+    isHod ||
+    isGuide ||
+    isStudent ||
+    isTeamLead
+  ) {
+    return null;
+  }
+
+  // If user already has significant powers (owner, admin, PM, can create tasks)
   if (isOwner || isAdmin || isPM || (canCreateTask && canCreateProject)) return null;
 
   return (

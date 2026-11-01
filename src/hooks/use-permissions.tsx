@@ -22,6 +22,10 @@ export interface PermissionContext {
 }
 
 export const LEGACY_KEY_MAP: Record<string, string> = {
+  comment: "comments:create",
+  create_comment: "comments:create",
+  add_comment: "comments:create",
+  "tasks:comments.create": "comments:create",
   edit_workspace: "workspace:settings.edit",
   edit_project: "projects:edit",
   delete_workspace: "workspace:delete",
@@ -166,6 +170,20 @@ export function usePermissions(
         if (catalogKey === "tasks:view.all" || actionOrKey === "view_everything") {
           if (effectiveData.permissions["tasks:view.all"]) return true;
           return false;
+        }
+
+        if (
+          catalogKey === "comments:create" ||
+          actionOrKey === "comment" ||
+          actionOrKey === "create_comment" ||
+          actionOrKey === "add_comment" ||
+          actionOrKey === "tasks:comments.create"
+        ) {
+          return Boolean(
+            effectiveData.permissions["comments:create"] ||
+            effectiveData.permissions["tasks:comments.create"] ||
+            effectiveData.permissions["comment"]
+          );
         }
 
         return Boolean(effectiveData.permissions[catalogKey]);

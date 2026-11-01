@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useGetProjects } from "@/features/projects/api/use-get-projects";
 import { ProjectAvatar } from "@/features/projects/components/project-avatar";
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
+import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
 import { useCreateProjectModal } from "@/features/projects/hooks/use-create-project-modal";
 import { usePermissions } from "@/hooks/use-permissions";
 
@@ -16,10 +17,18 @@ export const Projects = () => {
   const pathname = usePathname();
   const { open } = useCreateProjectModal();
   const workspaceId = useWorkspaceId();
+  const { data: workspace, isLoading: isWorkspaceLoading } = useGetWorkspace({ workspaceId });
   const { canCreateProject } = usePermissions(workspaceId);
   const { data, isLoading } = useGetProjects({
     workspaceId,
   });
+
+  const isCollege = workspace?.type === "COLLEGE";
+
+  // Completely omit Projects section in College workspaces
+  if (isWorkspaceLoading || isCollege) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-y-2">

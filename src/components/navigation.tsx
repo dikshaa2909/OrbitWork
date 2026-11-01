@@ -33,12 +33,27 @@ export const Navigation = () => {
   const workspaceId = useWorkspaceId();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { data: workspace } = useGetWorkspace({ workspaceId });
+  const { data: workspace, isLoading: isWorkspaceLoading } = useGetWorkspace({ workspaceId });
   const { canEditWorkspace, can } = usePermissions(workspaceId);
   const canManageRoles = can("roles:manage") || canEditWorkspace;
 
-  const isCollege = workspace?.type === "COLLEGE";
-  const { isHod, isGuide, isTeamLead, isStudent } = useCollegePersona(workspaceId);
+  const { isHod, isGuide, isTeamLead, isStudent, isLoading: isPersonaLoading } = useCollegePersona(workspaceId);
+
+  // Synchronized Layout Barrier: Never render startup or HOD fallbacks while queries resolve
+  if (isWorkspaceLoading || isPersonaLoading || !workspace) {
+    return (
+      <div className="flex flex-col gap-y-2 py-1">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-md">
+            <div className="size-5 rounded bg-neutral-200 dark:bg-neutral-800 animate-pulse shrink-0" />
+            <div className="h-4 w-28 bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const isCollege = workspace.type === "COLLEGE";
 
   // Dynamic routes based on workspace archetype & academic persona
   let activeRoutes: RouteItem[] = [];

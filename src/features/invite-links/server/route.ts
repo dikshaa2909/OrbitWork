@@ -21,6 +21,7 @@ import { can } from "@/lib/permissions/engine";
 import type { InviteLink } from "@/features/access-requests/types";
 import { Workspace } from "@/features/workspaces/types";
 import { Member, MemberRole } from "@/features/members/types";
+import type { AcademicTeamMember } from "@/features/college/types";
 
 const app = new Hono()
   // ── LIST ────────────────────────────────────────────────────────────────
@@ -352,12 +353,95 @@ const app = new Hono()
 
       const { workspaceId } = link;
 
-      // Reject if already a member of this workspace
+      // Check existing workspace membership
       const existing = await adminDatabases.listDocuments<Member>(
         DATABASE_ID, MEMBERS_ID,
         [Query.equal("workspaceId", workspaceId), Query.equal("userId", user.$id), Query.limit(1)]
       );
-      if (existing.total > 0) return c.json({ error: "Already a member of this workspace" }, 400);
+
+      // If user is already a workspace member:
+      // In college mode with team-scoped invite, allow adding to the academic team.
+      // Otherwise, reject corporate/workspace-wide joins.
+      if (existing.total > 0) {
+        if (!link.academic_team_id) {
+          return c.json({ error: "Already a member of this workspace" }, 400);
+        }
+
+        const existingMember = existing.documents[0];
+        const existingMemberId = existingMember.id || (existingMember as unknown as { $id?: string }).$id;
+
+        // Check if already in this academic team
+        const existingTeamMember = await adminDatabases.listDocuments<AcademicTeamMember>(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          [
+            Query.equal("team_id", link.academic_team_id),
+            Query.equal("member_id", existingMemberId),
+            Query.limit(1),
+          ]
+        ).catch(() => ({ total: 0, documents: [] as AcademicTeamMember[] }));
+
+        if (existingTeamMember.total > 0) {
+          return c.json({
+            data: {
+              workspaceId,
+              memberId: existingMemberId,
+              targetRole: link.target_role || "MEMBER",
+              academicTeamId: link.academic_team_id,
+            },
+          });
+        }
+
+        // Add to academic team
+        await adminDatabases.createDocument(
+          DATABASE_ID,
+          ACADEMIC_TEAM_MEMBERS_ID,
+          ID.unique(),
+          {
+            team_id: link.academic_team_id,
+            member_id: existingMemberId,
+            role: link.target_role === "STUDENT_LEAD" ? "LEAD" : "MEMBER",
+            joined_at: new Date().toISOString(),
+          }
+        );
+
+        // Add to team chat channel if exists
+        try {
+          const channels = await adminDatabases.listDocuments<{ id: string; team_id?: string }>(
+            DATABASE_ID,
+            CHANNELS_ID,
+            [
+              Query.equal("workspace_id", workspaceId),
+              Query.equal("team_id", link.academic_team_id),
+              Query.limit(1),
+            ]
+          );
+          if (channels.total > 0 && existingMemberId) {
+            await adminDatabases.createDocument(
+              DATABASE_ID,
+              CHANNEL_MEMBERS_ID,
+              ID.unique(),
+              {
+                channel_id: channels.documents[0].id,
+                member_id: existingMemberId,
+                role: link.target_role === "STUDENT_LEAD" ? "ADMIN" : "MEMBER",
+                joined_at: new Date().toISOString(),
+              }
+            );
+          }
+        } catch {
+          // Channel member addition fallback
+        }
+
+        return c.json({
+          data: {
+            workspaceId,
+            memberId: existingMemberId,
+            targetRole: link.target_role || "MEMBER",
+            academicTeamId: link.academic_team_id,
+          },
+        });
+      }
 
       // Atomic use consumption: UPDATE ... WHERE uses < maxUses AND revoked = false RETURNING
       let consumed = false;

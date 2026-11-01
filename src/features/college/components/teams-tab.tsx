@@ -9,7 +9,6 @@ import {
   Crown,
   UserPlus,
   MessageSquare,
-  ExternalLink,
   MoreVertical,
   UserMinus,
   Users,
@@ -269,15 +268,6 @@ export const TeamsTab: React.FC<TeamsTabProps> = ({
                       <Badge variant="outline" className="font-mono text-xs font-bold px-2 py-0.5 bg-primary/5 text-primary border-primary/20">
                         {t.team_code}
                       </Badge>
-                      {t.project_id && (
-                        <Link
-                          href={`/workspaces/${workspaceId}/projects/${t.project_id}`}
-                          className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 ml-1 transition-colors"
-                          title="Open Kanban Board & Sprints"
-                        >
-                          <ExternalLink className="size-3" />
-                        </Link>
-                      )}
                     </div>
 
                     {hasGuide ? (
@@ -437,14 +427,6 @@ export const TeamsTab: React.FC<TeamsTabProps> = ({
                       <MessageSquare className="size-3.5" />
                     </Link>
                   </Button>
-
-                  {t.project_id && (
-                    <Button size="sm" variant="secondary" className="h-8 px-2.5" asChild title="Tasks & Board">
-                      <Link href={`/workspaces/${workspaceId}/projects/${t.project_id}`}>
-                        <ExternalLink className="size-3.5" />
-                      </Link>
-                    </Button>
-                  )}
                 </div>
               </div>
             );

@@ -7,15 +7,24 @@ export const createTaskSchema = z.object({
   status: z.nativeEnum(TaskStatus, { required_error: "Required" }),
   workspaceId: z.string().trim().min(1, "Required"),
   projectId: z.string().trim().min(1, "Required"),
-  dueDate: z.coerce.date(),
+  dueDate: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? null : val),
+    z.coerce.date().nullable().optional()
+  ),
   assigneeId: z.string().trim().min(1, "Required"),
   description: z.string().optional(),
   type: z.nativeEnum(TaskType).optional(),
   priority: z.nativeEnum(TaskPriority).optional(),
   parentId: z.string().trim().nullish(),
   reporterId: z.string().trim().nullish(),
-  storyPoints: z.coerce.number().int().min(0).nullish(),
-  estimatedHours: z.coerce.number().min(0).nullish(),
+  storyPoints: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? null : val),
+    z.coerce.number().int().min(0).nullish()
+  ),
+  estimatedHours: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? null : val),
+    z.coerce.number().min(0).nullish()
+  ),
   sprintId: z.string().trim().nullish(),
   labelIds: z.array(z.string()).optional(),
 });

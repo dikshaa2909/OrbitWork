@@ -49,7 +49,27 @@ export const CollegeHodDashboardView: React.FC<CollegeHodDashboardViewProps> = (
   const { data: batches = [] } = useGetBatches({
     workspaceId,
   });
-  const activeBatch: Batch | undefined = batches[0];
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+
+  const activeBatch: Batch | undefined = React.useMemo(() => {
+    if (selectedBatchId) {
+      const found = batches.find((b) => b.id === selectedBatchId);
+      if (found) return found;
+    }
+    const saved = typeof window !== "undefined" ? localStorage.getItem(`activeBatchId_${workspaceId}`) : null;
+    if (saved) {
+      const found = batches.find((b) => b.id === saved);
+      if (found) return found;
+    }
+    return batches.find((b) => b.name.toLowerCase().includes("be")) || batches[0];
+  }, [batches, selectedBatchId, workspaceId]);
+
+  const handleSelectBatch = (id: string) => {
+    setSelectedBatchId(id);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`activeBatchId_${workspaceId}`, id);
+    }
+  };
 
   const { data: groups = [] } = useGetBatchOverview({
     batchId: activeBatch?.id,
@@ -156,8 +176,21 @@ export const CollegeHodDashboardView: React.FC<CollegeHodDashboardViewProps> = (
           </p>
         </div>
 
-        {/* Strict HOD Actions: One Primary CTA + Secondary Kebab Menu */}
-        <div className="flex items-center gap-2">
+        {/* Strict HOD Actions: Batch Switcher, Primary CTA + Secondary Kebab Menu */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {batches.length > 0 && (
+            <select
+              value={activeBatch?.id || ""}
+              onChange={(e) => handleSelectBatch(e.target.value)}
+              className="h-8 px-2.5 rounded-md border border-input bg-card text-xs font-semibold"
+            >
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.department})
+                </option>
+              ))}
+            </select>
+          )}
           {totalGroups > 0 && (
             <Button
               size="sm"

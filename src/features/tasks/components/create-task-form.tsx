@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -39,33 +40,67 @@ import { useCreateTask } from "../api/use-create-task";
 
 interface CreateTaskFormProps {
   onCancel?: () => void;
-  projectOptions: { id: string; name: string; imageUrl: string }[];
+  projectOptions: { id: string; name: string; imageUrl?: string }[];
   memberOptions: { id: string; name: string }[];
+  isCollegeGroupMode?: boolean;
+  collegeGroupTitle?: string;
+  defaultProjectId?: string;
 }
 
 export const CreateTaskForm = ({
   onCancel,
   projectOptions,
   memberOptions,
+  isCollegeGroupMode = false,
+  defaultProjectId,
 }: CreateTaskFormProps) => {
   const workspaceId = useWorkspaceId();
   const { mutate, isPending } = useCreateTask();
   const { data: sprintsData } = useGetSprints({ workspaceId });
   const sprints = sprintsData?.documents || [];
 
+  const initialProjectId = defaultProjectId || projectOptions[0]?.id || "";
+
   const form = useForm<z.infer<typeof createTaskSchema>>({
     resolver: zodResolver(createTaskSchema.omit({ workspaceId: true })),
     defaultValues: {
       workspaceId,
+      projectId: initialProjectId,
       type: TaskType.TASK,
       priority: TaskPriority.MEDIUM,
       status: TaskStatus.TODO,
+      assigneeId: memberOptions[0]?.id || "",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
 
+  useEffect(() => {
+    if (!form.getValues("assigneeId") && memberOptions[0]?.id) {
+      form.setValue("assigneeId", memberOptions[0].id);
+    }
+  }, [memberOptions, form]);
+
+  useEffect(() => {
+    if (!form.getValues("projectId") && initialProjectId) {
+      form.setValue("projectId", initialProjectId);
+    }
+  }, [initialProjectId, form]);
+
   const onSubmit = (values: z.infer<typeof createTaskSchema>) => {
+    const finalProjectId = values.projectId || initialProjectId;
     mutate(
-      { json: { ...values, workspaceId } },
+      {
+        json: {
+          ...values,
+          workspaceId,
+          projectId: finalProjectId,
+          dueDate: values.dueDate
+            ? values.dueDate instanceof Date
+              ? values.dueDate
+              : new Date(values.dueDate)
+            : null,
+        },
+      },
       {
         onSuccess: () => {
           form.reset();
@@ -198,7 +233,7 @@ export const CreateTaskForm = ({
                 />
               </div>
 
-              {/* Due Date & Assignee Row */}
+              {/* Due Date & Status Row */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -214,43 +249,6 @@ export const CreateTaskForm = ({
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="assigneeId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Assignee</FormLabel>
-                      <Select
-                        defaultValue={field.value}
-                        onValueChange={field.onChange}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select assignee" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <FormMessage />
-                        <SelectContent>
-                          {memberOptions.map((member) => (
-                            <SelectItem key={member.id} value={member.id}>
-                              <div className="flex items-center gap-x-2">
-                                <MemberAvatar
-                                  className="size-6"
-                                  name={member.name}
-                                />
-                                {member.name}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              {/* Status & Project Row */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
                   name="status"
@@ -284,33 +282,35 @@ export const CreateTaskForm = ({
                     </FormItem>
                   )}
                 />
+              </div>
 
+              {/* Assignee & (optional Project for startup mode) Row */}
+              <div className={cn("grid gap-4", isCollegeGroupMode ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2")}>
                 <FormField
                   control={form.control}
-                  name="projectId"
+                  name="assigneeId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Project</FormLabel>
+                      <FormLabel>Assignee</FormLabel>
                       <Select
                         defaultValue={field.value}
                         onValueChange={field.onChange}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select project" />
+                            <SelectValue placeholder="Select assignee" />
                           </SelectTrigger>
                         </FormControl>
                         <FormMessage />
                         <SelectContent>
-                          {projectOptions.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
+                          {memberOptions.map((member) => (
+                            <SelectItem key={member.id} value={member.id}>
                               <div className="flex items-center gap-x-2">
-                                <ProjectAvatar
+                                <MemberAvatar
                                   className="size-6"
-                                  name={project.name}
-                                  image={project.imageUrl}
+                                  name={member.name}
                                 />
-                                {project.name}
+                                {member.name}
                               </div>
                             </SelectItem>
                           ))}
@@ -319,6 +319,43 @@ export const CreateTaskForm = ({
                     </FormItem>
                   )}
                 />
+
+                {!isCollegeGroupMode && (
+                  <FormField
+                    control={form.control}
+                    name="projectId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project</FormLabel>
+                        <Select
+                          defaultValue={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select project" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <FormMessage />
+                          <SelectContent>
+                            {projectOptions.map((project) => (
+                              <SelectItem key={project.id} value={project.id}>
+                                <div className="flex items-center gap-x-2">
+                                  <ProjectAvatar
+                                    className="size-6"
+                                    name={project.name}
+                                    image={project.imageUrl}
+                                  />
+                                  {project.name}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                )}
               </div>
 
               {/* Sprint & Estimation Row */}

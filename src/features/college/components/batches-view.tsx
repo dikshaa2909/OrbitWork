@@ -78,12 +78,24 @@ export const BatchesView: React.FC<BatchesViewProps> = ({ workspaceId }) => {
 
   const { mutate: createBatch, isPending: isCreatingBatch } = useCreateBatch();
 
-  // Auto-select first batch
+  // Persistent auto-select batch
   useEffect(() => {
     if (!selectedBatch && batches.length > 0) {
-      setSelectedBatch(batches[0]);
+      const savedBatchId = typeof window !== "undefined" ? localStorage.getItem(`activeBatchId_${workspaceId}`) : null;
+      const paramBatchId = searchParams.get("batchId");
+      const targetId = paramBatchId || savedBatchId;
+      const matched = batches.find((b) => b.id === targetId);
+      const fallback = batches.find((b) => b.name.toLowerCase().includes("be")) || batches[0];
+      setSelectedBatch(matched || fallback);
     }
-  }, [batches, selectedBatch]);
+  }, [batches, selectedBatch, searchParams, workspaceId]);
+
+  const handleSelectBatch = (batch: Batch) => {
+    setSelectedBatch(batch);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`activeBatchId_${workspaceId}`, batch.id);
+    }
+  };
 
   const { data: teams = [], isLoading: isTeamsLoading } = useGetAcademicTeams({
     batchId: selectedBatch?.id,
@@ -162,10 +174,25 @@ export const BatchesView: React.FC<BatchesViewProps> = ({ workspaceId }) => {
   }
 
   // Student Experience: Sequential milestone roadmap & deliverables submission portal
-  if ((isStudent || isTeamLead) && teamId) {
+  if (isStudent || isTeamLead) {
+    if (teamId) {
+      return (
+        <div className="space-y-6">
+          <StudentMilestonePortal workspaceId={workspaceId} teamId={teamId} />
+        </div>
+      );
+    }
+
     return (
-      <div className="space-y-6">
-        <StudentMilestonePortal workspaceId={workspaceId} teamId={teamId} />
+      <div className="py-16 text-center border border-dashed rounded-2xl space-y-3 bg-muted/10">
+        <GraduationCap className="size-10 mx-auto text-primary" />
+        <h3 className="text-base font-bold text-foreground">Project Group Required</h3>
+        <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+          You are enrolled as a student. Join your project group using the group invite code from your dashboard to view defense milestones and submit deliverables.
+        </p>
+        <Button asChild size="sm" variant="primary">
+          <Link href={`/workspaces/${workspaceId}`}>Go to Group Workspace</Link>
+        </Button>
       </div>
     );
   }
@@ -286,7 +313,7 @@ export const BatchesView: React.FC<BatchesViewProps> = ({ workspaceId }) => {
               value={selectedBatch?.id || ""}
               onChange={(e) => {
                 const found = batches.find((b) => b.id === e.target.value);
-                if (found) setSelectedBatch(found);
+                if (found) handleSelectBatch(found);
               }}
               className="h-9 px-3 rounded-md border border-input bg-card text-xs font-semibold"
             >

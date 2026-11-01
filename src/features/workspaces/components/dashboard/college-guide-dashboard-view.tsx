@@ -16,6 +16,7 @@ import {
   Crown,
   KeyRound,
   ShieldAlert,
+  KanbanSquare,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ import { useUpdateTeamMemberRole } from "@/features/college/api/use-update-team-
 import { useRemoveTeamMember } from "@/features/college/api/use-remove-team-member";
 import { Workspace } from "@/features/workspaces/types";
 import { AcademicTeam, GuideTaskVerificationItem } from "@/features/college/types";
+import { FacultyGroupProgressBoard } from "@/features/college/components/faculty-group-progress-board";
 
 interface CollegeGuideDashboardViewProps {
   workspace: Workspace;
@@ -71,6 +73,9 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
     studentName: string;
   } | null>(null);
 
+  // Group Progress Board Inspection State
+  const [selectedTeamIdForBoard, setSelectedTeamIdForBoard] = useState<string | null>(null);
+
   // Queries & Mutations
   const { data: currentMember } = useCurrentMember({ workspaceId });
   const { data: dashboardData, isLoading } = useGetGuideDashboard({ workspaceId });
@@ -86,6 +91,7 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
   const groups = dashboardData?.groups || [];
   const batches = dashboardData?.batches || [];
   const totalStudents = dashboardData?.totalStudents || 0;
+  const activeGroup = groups.find((g) => g.id === selectedTeamIdForBoard) || null;
 
   const handleCopyCode = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -265,8 +271,38 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
         </Dialog>
       )}
 
-      {/* ── 1. Top Banner: Faculty Guide Profile & Primary "Create Project Group" Action ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-transparent border border-border">
+      {activeGroup ? (
+        <FacultyGroupProgressBoard
+          workspaceId={workspaceId}
+          group={activeGroup}
+          onBack={() => setSelectedTeamIdForBoard(null)}
+          onVerifyTask={(taskId) => {
+            verifyTask({
+              param: { taskId },
+              json: { decision: "APPROVED" },
+            });
+          }}
+          onRequestChanges={(task) => {
+            setActiveTaskForChanges({
+              id: task.$id || task.id,
+              name: task.name,
+              status: task.status,
+              verification_status: "PENDING_GUIDE_REVIEW",
+              team_id: activeGroup.id,
+              team_title: activeGroup.title,
+              team_code: activeGroup.team_code,
+              assignee_name: task.assignee?.name || "Student",
+              submission_notes: task.submission_notes || null,
+              submission_file_url: task.submission_file_url || null,
+              due_date: task.dueDate || new Date().toISOString(),
+            });
+          }}
+          isVerifying={isVerifying}
+        />
+      ) : (
+        <>
+          {/* ── 1. Top Banner: Faculty Guide Profile & Primary "Create Project Group" Action ── */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-transparent border border-border">
         <div>
           <div className="flex items-center gap-2">
             <span className="p-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
@@ -456,41 +492,52 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
                     </div>
 
                     {/* Bottom Action Bar */}
-                    <div className="pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
+                    <div className="pt-3 border-t space-y-2">
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setSelectedTeamForInvite({
-                            id: group.id,
-                            team_code: group.team_code,
-                            title: group.title,
-                            batch_id: group.batch_id,
-                          } as AcademicTeam)
-                        }
-                        className="text-xs h-8 gap-1.5"
+                        onClick={() => setSelectedTeamIdForBoard(group.id)}
+                        className="w-full text-xs h-8.5 gap-1.5 font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs"
                       >
-                        <Plus className="size-3.5" />
-                        Invite Students
+                        <KanbanSquare className="size-3.5" />
+                        Open Group Workspace / Progress Board
                       </Button>
 
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="text-xs h-8 gap-1.5 font-medium"
-                        asChild
-                      >
-                        <Link
-                          href={
-                            group.channel_id
-                              ? `/workspaces/${workspaceId}/chat?channelId=${group.channel_id}`
-                              : `/workspaces/${workspaceId}/chat`
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setSelectedTeamForInvite({
+                              id: group.id,
+                              team_code: group.team_code,
+                              title: group.title,
+                              batch_id: group.batch_id,
+                            } as AcademicTeam)
                           }
+                          className="text-xs h-8 gap-1.5"
                         >
-                          <MessageSquare className="size-3.5" />
-                          Open Group Chat
-                        </Link>
-                      </Button>
+                          <Plus className="size-3.5" />
+                          Invite Students
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="text-xs h-8 gap-1.5 font-medium"
+                          asChild
+                        >
+                          <Link
+                            href={
+                              group.channel_id
+                                ? `/workspaces/${workspaceId}/chat?channelId=${group.channel_id}`
+                                : `/workspaces/${workspaceId}/chat`
+                            }
+                          >
+                            <MessageSquare className="size-3.5" />
+                            Open Group Chat
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -581,6 +628,8 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
           </div>
         )}
       </div>
+      </>
+    )}
     </div>
   );
 };

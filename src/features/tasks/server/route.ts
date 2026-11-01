@@ -6,12 +6,14 @@ import { getMember } from "@/features/members/utils";
 import { Member } from "@/features/members/types";
 import { Project } from "@/features/projects/types";
 
-import { createAdminClient, ID, Query } from "@/lib/supabase";
+import { createAdminClient, getAdminDatabases, ID, Query } from "@/lib/supabase";
 import { sessionMiddleware } from "@/lib/session-middleware";
 import { Context } from "hono";
 import { can } from "@/lib/permissions/engine";
 import { getMemberPermissionProfile } from "@/lib/permissions/server";
 import {
+  ACADEMIC_TEAM_MEMBERS_ID,
+  ACADEMIC_TEAMS_ID,
   COMMENTS_ID,
   DATABASE_ID,
   LABELS_ID,
@@ -20,6 +22,8 @@ import {
   TASK_ACTIVITY_ID,
   TASK_LINKS_ID,
   TASKS_ID,
+  TEAM_GUIDES_ID,
+  WORKSPACES_ID,
 } from "@/config";
 
 import {
@@ -270,6 +274,22 @@ const app = new Hono()
           ? highestPositionTask.documents[0].position + 1000
           : 1000;
 
+      // Ensure a valid ISO dueDate is always present to fulfill Postgres NOT NULL constraint
+      const fallbackDueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      let finalDueDate: string;
+      if (dueDate) {
+        if (dueDate instanceof Date) {
+          finalDueDate = dueDate.toISOString();
+        } else if (typeof dueDate === "string") {
+          const parsed = new Date(dueDate);
+          finalDueDate = isNaN(parsed.getTime()) ? fallbackDueDate : parsed.toISOString();
+        } else {
+          finalDueDate = fallbackDueDate;
+        }
+      } else {
+        finalDueDate = fallbackDueDate;
+      }
+
       const task = await databases.createDocument<Task>(
         DATABASE_ID,
         TASKS_ID,
@@ -279,7 +299,7 @@ const app = new Hono()
           status,
           workspaceId,
           projectId,
-          dueDate: typeof dueDate === "string" ? dueDate : dueDate.toISOString(),
+          dueDate: finalDueDate,
           assigneeId,
           position: newPosition,
           description: description || null,
@@ -362,7 +382,7 @@ const app = new Hono()
             payload.status = TaskStatus.DONE;
             payload.verification_status = "APPROVED";
             payload.verified_at = new Date().toISOString();
-            payload.verified_by = user.$id;
+            payload.verified_by = profile.id;
           } else {
             // Student / Lead gatekeeper: redirect to IN_REVIEW pending guide verification
             payload.status = TaskStatus.IN_REVIEW;
@@ -378,10 +398,13 @@ const app = new Hono()
       if (updates.description !== undefined) payload.description = updates.description;
       if (updates.projectId !== undefined) payload.projectId = updates.projectId;
       if (updates.dueDate !== undefined) {
-        payload.dueDate =
-          typeof updates.dueDate === "string"
+        if (updates.dueDate) {
+          payload.dueDate = typeof updates.dueDate === "string"
             ? updates.dueDate
             : updates.dueDate.toISOString();
+        } else {
+          payload.dueDate = existingTask.dueDate;
+        }
       }
       if (updates.assigneeId !== undefined) payload.assigneeId = updates.assigneeId;
       if (updates.type !== undefined) payload.type = updates.type;
@@ -543,7 +566,7 @@ const app = new Hono()
             if (canVerify) {
               extraFields.verification_status = "APPROVED";
               extraFields.verified_at = new Date().toISOString();
-              extraFields.verified_by = user.$id;
+              extraFields.verified_by = profile.id;
             } else {
               targetStatus = TaskStatus.IN_REVIEW;
               extraFields.verification_status = "PENDING_GUIDE_REVIEW";
@@ -660,7 +683,54 @@ const app = new Hono()
       const profile = await getMemberPermissionProfile(databases, task.workspaceId, user.$id);
       if (!profile) return c.json({ error: "Unauthorized" }, 401);
 
-      if (!can(profile, "comments:create", { projectId: task.projectId })) {
+      let isAllowedToComment =
+        can(profile, "comments:create", { projectId: task.projectId }) ||
+        can(profile, "tasks:comments.create", { projectId: task.projectId });
+
+      if (!isAllowedToComment) {
+        // In College mode, check if user is assigned guide, HOD, or team student
+        const adminDatabases = getAdminDatabases("tasks:comment-create");
+        const [wsDoc, teamDoc] = await Promise.all([
+          adminDatabases.getDocument<{ type?: string }>(DATABASE_ID, WORKSPACES_ID, task.workspaceId).catch(() => null),
+          adminDatabases.listDocuments<{ id: string; lead_member_id?: string }>(
+            DATABASE_ID,
+            ACADEMIC_TEAMS_ID,
+            [Query.equal("project_id", task.projectId), Query.limit(1)]
+          ).catch(() => ({ documents: [] })),
+        ]);
+
+        if (wsDoc?.type === "COLLEGE") {
+          // Check HOD / Admin level
+          if (profile.role?.level !== undefined && profile.role.level <= 10) {
+            isAllowedToComment = true;
+          } else if (teamDoc.documents.length > 0) {
+            const team = teamDoc.documents[0];
+            // Check if actor is an assigned guide of the team
+            const guideMatch = await adminDatabases.listDocuments<{ id: string }>(
+              DATABASE_ID,
+              TEAM_GUIDES_ID,
+              [Query.equal("team_id", team.id), Query.contains("guide_member_id", [profile.id, user.$id])]
+            ).catch(() => ({ documents: [] }));
+
+            if (guideMatch.documents.length > 0) {
+              isAllowedToComment = true;
+            } else {
+              // Check if actor is a student member of this team
+              const studentMatch = await adminDatabases.listDocuments<{ id: string }>(
+                DATABASE_ID,
+                ACADEMIC_TEAM_MEMBERS_ID,
+                [Query.equal("team_id", team.id), Query.equal("member_id", profile.id)]
+              ).catch(() => ({ documents: [] }));
+
+              if (studentMatch.documents.length > 0) {
+                isAllowedToComment = true;
+              }
+            }
+          }
+        }
+      }
+
+      if (!isAllowedToComment) {
         return deny(c, "comments:create");
       }
 
