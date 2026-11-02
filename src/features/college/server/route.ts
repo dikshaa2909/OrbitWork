@@ -240,6 +240,11 @@ const app = new Hono()
               guideName = resMap.get(guideUserId)?.name || resMap.get(gId)?.name || "Faculty Guide";
             }
 
+            if (teamDoc.lead_member_id) {
+              isTeamLead = teamDoc.lead_member_id === memberId || teamDoc.lead_member_id === user.$id;
+              isStudent = !isTeamLead;
+            }
+
             teamData = {
               id: teamDoc.id,
               teamCode: teamDoc.team_code,
@@ -2813,6 +2818,11 @@ const app = new Hono()
       }
 
       // Group members by team_id
+      const teamLeadMap = new Map<string, string | null>();
+      for (const t of teamsDoc.documents) {
+        teamLeadMap.set(t.id, t.lead_member_id || null);
+      }
+
       const membersByTeam = new Map<string, Array<{
         id: string;
         memberId: string;
@@ -2829,12 +2839,14 @@ const app = new Hono()
           email: "",
         };
         const list = membersByTeam.get(tm.team_id) || [];
+        const officialLeadId = teamLeadMap.get(tm.team_id);
+        const isOfficialLead = officialLeadId ? tm.member_id === officialLeadId : tm.role === "LEAD";
         list.push({
           id: tm.id || (tm as unknown as { $id?: string }).$id || tm.member_id,
           memberId: tm.member_id,
           name: u.name,
           email: u.email,
-          role: tm.role || "MEMBER",
+          role: isOfficialLead ? "LEAD" : "MEMBER",
           joined_at: tm.joined_at,
         });
         membersByTeam.set(tm.team_id, list);
@@ -3575,16 +3587,24 @@ const app = new Hono()
 
       const guideName = guideId ? (userMap.get(guideId)?.name || "Faculty Guide") : "Not Assigned";
 
+      const isActorLead = Boolean(
+        team.lead_member_id
+          ? team.lead_member_id === memberId || team.lead_member_id === user.$id
+          : memberRole === "LEAD"
+      );
+
       const rosterMembers = rosterMemberIds.map((mId) => {
         const u = userMap.get(mId);
-        const tRole = membersDoc.documents.find((doc) => doc.member_id === mId)?.role || (mId === team.lead_member_id ? "LEAD" : "MEMBER");
+        const isOfficialLead = team.lead_member_id
+          ? mId === team.lead_member_id
+          : membersDoc.documents.find((doc) => doc.member_id === mId)?.role === "LEAD";
         return {
           id: mId,
           memberId: mId,
           name: u?.name || "Student",
           email: u?.email || "",
-          role: tRole,
-          isLead: tRole === "LEAD",
+          role: isOfficialLead ? ("LEAD" as const) : ("MEMBER" as const),
+          isLead: isOfficialLead,
         };
       });
 
@@ -3608,8 +3628,8 @@ const app = new Hono()
             batch_id: team.batch_id,
           },
           batch: batch ? { id: batch.id, name: batch.name, department: batch.department, academic_year: batch.academic_year } : null,
-          userRole: memberRole,
-          isLead: memberRole === "LEAD",
+          userRole: isActorLead ? "LEAD" : "MEMBER",
+          isLead: isActorLead,
           guide: { id: guideId, name: guideName },
           roster: rosterMembers,
           progressPercentage,

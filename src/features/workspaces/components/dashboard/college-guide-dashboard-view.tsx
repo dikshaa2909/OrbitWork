@@ -393,7 +393,9 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {groups.map((group) => {
-              const leadStudent = group.roster.find((m) => m.role === "LEAD" || m.memberId === group.lead_member_id);
+              const leadStudent = group.roster.find((m) =>
+                group.lead_member_id ? m.memberId === group.lead_member_id : m.role === "LEAD"
+              );
 
               return (
                 <Card
@@ -468,7 +470,13 @@ export const CollegeGuideDashboardView: React.FC<CollegeGuideDashboardViewProps>
                           member_id: r.memberId,
                           name: r.name,
                           email: r.email,
-                          role: r.role === "LEAD" || r.memberId === group.lead_member_id ? "LEAD" : "MEMBER",
+                          role: group.lead_member_id
+                            ? r.memberId === group.lead_member_id
+                              ? "LEAD"
+                              : "MEMBER"
+                            : r.role === "LEAD"
+                            ? "LEAD"
+                            : "MEMBER",
                           joined_at: new Date().toISOString(),
                         }))}
                         canManage={true}

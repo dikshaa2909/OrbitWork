@@ -254,7 +254,9 @@ export const TeamsTab: React.FC<TeamsTabProps> = ({
               t.guides?.some((g) => g.guide_member_id === memberId) || isHod;
 
             const roster = t.members || [];
-            const lead = roster.find((m) => m.role === "LEAD");
+            const lead = roster.find((m) =>
+              t.lead_member_id ? m.member_id === t.lead_member_id : m.role === "LEAD"
+            );
 
             return (
               <div
@@ -338,7 +340,9 @@ export const TeamsTab: React.FC<TeamsTabProps> = ({
                     ) : (
                       <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                         {roster.map((student) => {
-                          const isStudentLead = student.role === "LEAD";
+                          const isStudentLead = t.lead_member_id
+                            ? student.member_id === t.lead_member_id
+                            : student.role === "LEAD";
                           const studentMemberId = student.member_id;
 
                           return (
